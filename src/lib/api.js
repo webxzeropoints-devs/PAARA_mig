@@ -14,7 +14,7 @@ const resolveBaseUrl = () => {
     }
   }
 
-  return "http://localhost:4000/api";
+  return "https://paara-backend-50045676810.development.catalystappsail.in/api";
 };
 
 const BASE_URL = resolveBaseUrl();
@@ -232,8 +232,8 @@ export const getAddresses = () => apiGet("/addresses");
 export const postAddress = (payload) => apiPost("/addresses", payload);
 
 export const postOrder = (payload) => apiPost("/orders", payload);
-export const createUpiPayment = (payload) => apiPost("/payment/create-upi", payload);
-export const previewInvoice = async (items, addressId, paymentMethod = "razorpay") => {
+export const createPayuCheckout = (order_id) => apiPost("/payment/create", { order_id });
+export const previewInvoice = async (items, addressId, paymentMethod = "payu") => {
   const res = await fetch(`${BASE_URL}/orders/proforma`, {
     method: "POST",
     headers: buildHeaders(),
@@ -263,9 +263,6 @@ export const processLoyaltyOrder = (orderId) => apiPost("/loyalty/process-order"
 export const markLoyaltyAnimationShown = (orderId) => apiPost("/loyalty/mark-animation-shown", { order_id: orderId });
 export const updateOrderStatus = (orderId, status) => adminRequest(`/admin/orders/${orderId}/status`, { method: "PATCH", body: { status } });
 
-export const postCreateRazorpay = (order_id) =>
-  apiPost("/payment/create-razorpay-order", { order_id });
-export const postVerifyPayment = (payload) => apiPost("/payment/verify", payload);
 export const validateCoupon = (code, subtotal) => apiPost("/coupons/validate", { code, subtotal });
 export const downloadInvoice = async (orderId) => {
   const res = await fetch(`${BASE_URL}/orders/${orderId}/invoice`, {

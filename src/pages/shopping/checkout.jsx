@@ -6,14 +6,12 @@ import { useCart } from "../../lib/cart.jsx";
 import {
   apiGet,
   apiPost,
-  createUpiPayment,
+  createPayuCheckout,
   getAddresses,
   getProducts,
   getShippingCities,
   getToken,
   postAddress,
-  postCreateRazorpay,
-  postVerifyPayment,
   previewInvoice,
   postOrder,
   postShippingQuote,
@@ -26,28 +24,8 @@ const formatPrice = (n) => `₹${(n || 0).toLocaleString("en-IN")}`;
 
 const STEPS = ["Address", "Delivery", "Payment"];
 const PAYMENT_METHODS = [
-  { id: "manual_upi", label: "Pay via UPI", description: "Scan QR or pay via UPI ID, then confirm with your reference number." },
-  { id: "cod", label: "Cash on Delivery", description: "Pay in cash when your order arrives" },
+  { id: "payu", label: "PayU", description: "Secure checkout for UPI, cards, and net banking." },
 ];
-const isCodEnabled = false;
-
-function loadRazorpay() {
-  if (window.Razorpay) return Promise.resolve(window.Razorpay);
-  return new Promise((resolve, reject) => {
-    const existing = document.querySelector('script[src="https://checkout.razorpay.com/v1/checkout.js"]');
-    if (existing) {
-      existing.addEventListener("load", () => resolve(window.Razorpay), { once: true });
-      existing.addEventListener("error", () => reject(new Error("Payment methods could not be loaded. Please try again.")), { once: true });
-      return;
-    }
-    const script = document.createElement("script");
-    script.src = "https://checkout.razorpay.com/v1/checkout.js";
-    script.async = true;
-    script.onload = () => window.Razorpay ? resolve(window.Razorpay) : reject(new Error("Payment methods could not be loaded. Please try again."));
-    script.onerror = () => reject(new Error("Payment methods could not be loaded. Check your connection and try again."));
-    document.body.appendChild(script);
-  });
-}
 
 export default function Checkout() {
   const navigate = useNavigate();
@@ -78,16 +56,11 @@ export default function Checkout() {
   const [order, setOrder] = useState(null);
   const [placing, setPlacing] = useState(false);
   const [paying, setPaying] = useState(false);
-  const [paymentMethod, setPaymentMethod] = useState("manual_upi");
-  const [manualUpi, setManualUpi] = useState({ ready: false, qr_code_url: "", deep_link: "", payee_name: "", upi_id: "", amount: 0, instructions: "" });
-  const [manualUpiUtr, setManualUpiUtr] = useState("");
-  const [upiPaid, setUpiPaid] = useState(false);
-  const [razorpayReady, setRazorpayReady] = useState(false);
+  const [paymentMethod] = useState("payu");
   const [paymentMethodsError, setPaymentMethodsError] = useState("");
   const [previewingInvoice, setPreviewingInvoice] = useState(false);
   const [previewUrl, setPreviewUrl] = useState("");
   const [error, setError] = useState("");
-  const upiPreparationStarted = useRef(false);
   const paymentRedirectStarted = useRef(false);
 
   useEffect(() => {
@@ -109,8 +82,6 @@ export default function Checkout() {
       .catch(() => setAddresses([]));
     getShippingCities().catch(() => setCities([]));
     getProducts().then((data) => setProducts(Array.isArray(data) ? data : [])).catch(() => setProducts([]));
-    setPaymentMethod("manual_upi");
-    setRazorpayReady(false);
     setPaymentMethodsError("");
   }, [navigate, items.length]);
 
@@ -172,17 +143,6 @@ export default function Checkout() {
     }
   };
 
-  const loadManualUpiDetails = async (orderId) => {
-    if (!orderId || paymentMethod !== "manual_upi") return;
-    try {
-      const provider = await apiGet(`/payment/provider/manual_upi?order_id=${orderId}`);
-      setManualUpi({ ready: true, qr_code_url: provider.qr_code_url || "", deep_link: provider.deep_link || "", payee_name: provider.payee_name || "Paara Jewellery", upi_id: provider.upi_id || "", amount: provider.amount || 0, instructions: provider.instructions || "" });
-    } catch (err) {
-      setManualUpi({ ready: false, qr_code_url: "", deep_link: "", payee_name: "", upi_id: "", amount: 0, instructions: "" });
-      setError(err?.message || "Could not prepare UPI details.");
-    }
-  };
-
   // Step 1 → 2: compute shipping quote from the selected address's city.
   const goToDelivery = async () => {
     if (!selectedAddress) {
@@ -239,150 +199,38 @@ export default function Checkout() {
     }
   };
 
-  const prepareManualUpi = async () => {
-    if (!selectedAddressId || items.length === 0) {
-      setError("Please select an address and add an item before paying.");
-      return null;
-    }
-
-    setPaying(true);
-    setError("");
-
-    try {
-      const orderPayload = {
-        items: items.map((item) => ({ product_id: item.product_id, quantity: item.quantity })),
-        address_id: selectedAddressId,
-      };
-      console.debug("[CHECKOUT_ORDER_PAYLOAD]", { ...orderPayload, address: selectedAddress });
-      const provider = await createUpiPayment(orderPayload);
-      const createdOrder = provider.order || provider;
-
-      setOrder(createdOrder);
-      setManualUpi({
-        ready: true,
-        qr_code_url: provider.qr_code_url || "",
-        deep_link: provider.deep_link || "",
-        payee_name: provider.payee_name || "Paara Jewellery",
-        upi_id: provider.upi_id || "",
-        amount: provider.amount || 0,
-        instructions: provider.instructions || "",
-      });
-      setError(provider.payment_available === false
-        ? provider.payment_error || "UPI payment is temporarily unavailable. Your order was saved; please contact support."
-        : "");
-      return createdOrder;
-    } catch (err) {
-      setError(err?.message || "Could not prepare the UPI payment details. Please try again.");
-      return null;
-    } finally {
-      setPaying(false);
-    }
-  };
-
-  useEffect(() => {
-    if (step !== 2 || paymentMethod !== "manual_upi" || !selectedAddressId || items.length === 0 || upiPreparationStarted.current) {
-      return;
-    }
-    upiPreparationStarted.current = true;
-    prepareManualUpi().catch(() => {
-      upiPreparationStarted.current = false;
-    });
-  }, [items.length, paymentMethod, selectedAddressId, step]);
-
-  const confirmUpiPaid = async () => {
-    setError("");
-    const paidOrder = order || await prepareManualUpi();
-    if (!paidOrder?.order_id) {
-      setError("We could not save your order. Please try again before confirming payment.");
-      return;
-    }
-    setUpiPaid(true);
-    paymentRedirectStarted.current = true;
-    navigate(`/order-confirmation?order_id=${paidOrder.order_id}&payment=success&payment_method=manual_upi`, {
-      replace: true,
-      state: { recentOrder: paidOrder, selectedAddress, clearCart: true },
-    });
-  };
-
-  // Non-UPI payment methods retain their existing order/payment flow.
   const payNow = async () => {
     if (!paymentMethod || !selectedAddressId || items.length === 0) {
       setError("Please select an address and add an item before paying.");
       return;
     }
 
-    if (paymentMethod === "manual_upi") {
-      await prepareManualUpi();
-      return;
-    }
-
     setPaying(true);
     setError("");
     try {
       const orderPayload = {
         items: items.map((item) => ({ product_id: item.product_id, quantity: item.quantity })),
         address_id: selectedAddressId,
-        payment_method: paymentMethod,
+        payment_method: "payu",
       };
       console.debug("[CHECKOUT_ORDER_PAYLOAD]", { ...orderPayload, address: selectedAddress });
-      const createdOrder = await postOrder({
-        ...orderPayload,
-      });
+      const createdOrder = order || await postOrder(orderPayload);
       if (!createdOrder?.order_id) throw new Error("The order could not be created. Please try again.");
       setOrder(createdOrder);
-      if (paymentMethod === "cod") {
-        paymentRedirectStarted.current = true;
-        navigate(`/order-confirmation?order_id=${createdOrder.order_id}&payment=success`, { replace: true, state: { recentOrder: createdOrder, selectedAddress, clearCart: true } });
-        return;
-      }
-
-      // Razorpay disabled — API keys pending approval. Re-enable by restoring this block.
-      /*
-      const Razorpay = await loadRazorpay();
-      const razorpayOrder = await postCreateRazorpay(createdOrder.order_id);
-      const razorpayCheckout = new Razorpay({
-        key: razorpayOrder.key_id,
-        amount: razorpayOrder.amount,
-        currency: razorpayOrder.currency,
-        name: "Paara.",
-        description: `Order #${createdOrder.order_number || createdOrder.order_id}`,
-        order_id: razorpayOrder.razorpay_order_id,
-        config: {
-          display: {
-            blocks: {
-              selected: {
-                name: PAYMENT_METHODS.find((method) => method.id === paymentMethod)?.label || "Payment",
-                instruments: [{ method: paymentMethod }],
-              },
-            },
-            sequence: ["block.selected"],
-            preferences: { show_default_blocks: false },
-          },
-        },
-        theme: { color: "#B98F4E" },
-        handler: async (response) => {
-          try {
-            await postVerifyPayment({
-              paara_order_id: createdOrder.order_id,
-              razorpay_order_id: response.razorpay_order_id,
-              razorpay_payment_id: response.razorpay_payment_id,
-              razorpay_signature: response.razorpay_signature,
-            });
-            paymentRedirectStarted.current = true;
-            navigate(`/order-confirmation?order_id=${createdOrder.order_id}&payment=success`, {
-              replace: true,
-              state: { recentOrder: createdOrder, selectedAddress, clearCart: true },
-            });
-          } catch (err) {
-            setError(err?.message || "Payment could not be verified. Please contact support if you were charged.");
-          } finally {
-            setPaying(false);
-          }
-        },
-        modal: { ondismiss: () => setPaying(false) },
+      const checkout = await createPayuCheckout(createdOrder.order_id);
+      const form = document.createElement("form");
+      form.method = checkout.method || "POST";
+      form.action = checkout.action;
+      Object.entries(checkout.fields || {}).forEach(([name, value]) => {
+        const input = document.createElement("input");
+        input.type = "hidden";
+        input.name = name;
+        input.value = String(value ?? "");
+        form.appendChild(input);
       });
-      razorpayCheckout.open();
-      */
+      document.body.appendChild(form);
+      paymentRedirectStarted.current = true;
+      form.submit();
     } catch (err) {
       setError(err?.message || "Could not start payment. Please try again.");
       setPaying(false);
@@ -616,19 +464,12 @@ export default function Checkout() {
                   <p className="mb-3 text-xs uppercase tracking-widest text-cocoa/60">Choose payment method</p>
                   <div className="grid gap-3 sm:grid-cols-2">
                     {PAYMENT_METHODS.map((method) => {
-                      const isDisabled = method.id === "cod" && !isCodEnabled;
+                      const isDisabled = false;
                       return (
                         <label key={method.id} aria-disabled={isDisabled} className={`border rounded-sm p-4 transition-colors ${isDisabled ? "cursor-not-allowed opacity-45" : "cursor-pointer"} ${paymentMethod === method.id && !isDisabled ? "border-gold bg-gold/10" : "border-cocoa/15 hover:border-cocoa/30"}`}>
                           <input type="radio" name="payment-method" value={method.id} checked={paymentMethod === method.id && !isDisabled} disabled={isDisabled} onChange={async () => {
                             if (isDisabled) return;
-                            if (method.id === "manual_upi") {
-                              setPaymentMethod("manual_upi");
-                              setManualUpiUtr("");
-                              setUpiPaid(false);
-                              return;
-                            }
-                            setPaymentMethod(method.id);
-                            setManualUpiUtr("");
+                            if (method.id !== "payu") return;
                           }} className="sr-only" />
                           <span className="block text-sm font-medium">{method.label}</span>
                           <span className="mt-1 block text-xs text-cocoa/60">{isDisabled ? "Currently unavailable" : method.description}</span>
@@ -637,32 +478,6 @@ export default function Checkout() {
                     })}
                   </div>
                   {paymentMethodsError && <p className="mt-3 text-xs text-red-700">{paymentMethodsError}</p>}
-                  {paymentMethod === "manual_upi" && (
-                    <div className="mt-4 border border-gold/30 bg-gold/5 p-4 rounded-sm">
-                      <p className="mb-2 text-[11px] uppercase tracking-[0.22em] text-cocoa/60">UPI payment</p>
-                      <p className="mb-3 text-xs text-cocoa/70">
-                        Scan with any UPI app (GPay, PhonePe, Paytm) to pay ₹{Number(manualUpi.amount || customerTotal || 0).toLocaleString("en-IN")}.
-                      </p>
-                      {paying && <p className="mb-3 flex items-center gap-2 text-sm text-cocoa/70"><span className="h-4 w-4 animate-spin rounded-full border-2 border-cocoa/20 border-t-gold" aria-hidden="true" />Generating your UPI QR code…</p>}
-                      {manualUpi.ready && <div className="flex items-center gap-4">
-                        {manualUpi.qr_code_url && (
-                          <img src={manualUpi.qr_code_url} alt="UPI QR code" className="h-28 w-28 rounded-md border border-cocoa/10 bg-white p-2" />
-                        )}
-                        <div className="text-sm text-cocoa/80">
-                          <p className="font-medium">Pay to: {manualUpi.payee_name || "Paara Jewellery"}</p>
-                          <p>UPI ID: {manualUpi.upi_id}</p>
-                          <p>Amount: ₹{Number(manualUpi.amount || customerTotal || 0).toLocaleString("en-IN")}</p>
-                          <a href={manualUpi.deep_link || "upi://pay"} className="mt-2 inline-block text-xs uppercase tracking-widest text-gold">Open UPI app</a>
-                        </div>
-                      </div>
-                      }
-
-                      <div className="mt-4 border-t border-gold/20 pt-4">
-                        <button type="button" onClick={confirmUpiPaid} disabled={paying} className="bg-gold text-white px-6 py-2 text-xs uppercase tracking-widest hover:bg-cocoa transition-colors disabled:opacity-60">I&apos;ve Paid</button>
-                        {upiPaid && <p className="mt-3 text-sm text-emerald-700">Payment Successful — Order Confirmed</p>}
-                      </div>
-                    </div>
-                  )}
                 </div>
                 <div className="bg-sand/60 border border-cocoa/10 rounded-sm p-5 mb-6">
                   <p className="text-xs uppercase tracking-widest text-cocoa/60">
@@ -671,16 +486,14 @@ export default function Checkout() {
                   <p className="font-numeric text-2xl mt-1">{formatPrice(customerTotal)}</p>
                   <p className="text-xs text-cocoa/60 mt-1">Inclusive of all taxes</p>
                 </div>
-                {paymentMethod !== "manual_upi" && (
-                  <motion.button
+                <motion.button
                     whileTap={{ scale: 0.97 }}
                     onClick={payNow}
                     disabled={paying || !shipping}
                     className="bg-gold text-white px-8 py-3 text-xs uppercase tracking-widest hover:bg-cocoa transition-colors disabled:opacity-60"
                   >
-                    {paying ? "Placing COD order…" : "Place COD order"}
+                    {paying ? "Opening PayU checkout…" : "Pay securely with PayU"}
                   </motion.button>
-                )}
               </div>
             )}
           </main>

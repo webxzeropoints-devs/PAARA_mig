@@ -1,7 +1,7 @@
 const express = require('express');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
-const db = require('../db/database');
+const db = require('../db/database.pg');
 const { requireAdminSession } = require('../middleware/adminAuth');
 const { issuePasswordResetOtp, consumePasswordResetOtp, markPasswordResetOtpUsed } = require('../utils/passwordReset');
 const { normalizeEmail } = require('../utils/emailOtp');
@@ -9,33 +9,60 @@ const { validatePassword, PASSWORD_ERROR, maskEmail } = require('../utils/valida
 
 const router = express.Router();
 
-// STEP 1 of login: verify email+password, then either require a password change
-// or send OTP based on the admin's force-change flag.
 router.post('/login', async (req, res) => {
   const { email, password } = req.body;
   if (!email || !password) return res.status(400).json({ error: 'email and password are required.' });
 
   const normalizedEmail = normalizeEmail(email);
-  const admin = db.prepare('SELECT id, name, email, password_hash, profile_image_url, must_change_password FROM admins WHERE email = ?').get(normalizedEmail)
-    || db.prepare('SELECT id, name, email, password_hash, profile_image_url, must_change_password FROM admins WHERE lower(email) = ?').get(normalizedEmail);
-  const passwordMatches = !!admin && bcrypt.compareSync(password, admin.password_hash);
-  console.log('[AUTH_LOGIN]', { actor: 'admin', email: maskEmail(normalizedEmail), adminFound: !!admin, passwordMatches });
+
+  let result = await db.query(
+    'SELECT id, name, email, password_hash, profile_image_url, must_change_password FROM admins WHERE email = $1 LIMIT 1',
+    [normalizedEmail]
+  );
+  let admin = result.rows[0];
+
+  if (!admin) {
+    result = await db.query(
+      'SELECT id, name, email, password_hash, profile_image_url, must_change_password FROM admins WHERE lower(email) = $1 LIMIT 1',
+      [normalizedEmail]
+    );
+    admin = result.rows[0];
+  }
+
+  const passwordMatches = !!admin && await bcrypt.compare(password, admin.password_hash);
+
+  console.log('[AUTH_LOGIN]', {
+    actor: 'admin',
+    email: maskEmail(normalizedEmail),
+    adminFound: !!admin,
+    passwordMatches
+  });
+
   if (!admin || !passwordMatches) {
     return res.status(401).json({ error: 'Invalid email or password.' });
   }
 
   let token;
   try {
-    token = jwt.sign({ id: admin.id, email: admin.email, role: 'admin' }, process.env.JWT_SECRET, { expiresIn: '12h' });
+    token = jwt.sign(
+      { id: admin.id, email: admin.email, role: 'admin' },
+      process.env.JWT_SECRET,
+      { expiresIn: '12h' }
+    );
   } catch (err) {
     console.error('[JWT_SIGN_ERROR]', err.message);
     return res.status(500).json({ error: 'Server configuration error. Contact support.' });
   }
-  await db.persistAfterWrite();
+
   return res.json({
     success: true,
     token,
-    admin: { id: admin.id, name: admin.name, email: admin.email, profile_image_url: admin.profile_image_url },
+    admin: {
+      id: admin.id,
+      name: admin.name,
+      email: admin.email,
+      profile_image_url: admin.profile_image_url
+    },
     admin_id: admin.id,
     email: admin.email,
     needs_setup: Boolean(admin.must_change_password),
@@ -53,23 +80,39 @@ router.post('/set-password', async (req, res) => {
     return res.status(400).json({ error: 'admin_id, new_password and new_email are required.' });
   }
 
-  const admin = db.prepare('SELECT id, name, email, password_hash, profile_image_url, must_change_password FROM admins WHERE id = ?').get(admin_id);
+  const result = await db.query(
+    'SELECT id, name, email, password_hash, profile_image_url, must_change_password FROM admins WHERE id = $1 LIMIT 1',
+    [admin_id]
+  );
+  const admin = result.rows[0];
+
   if (!admin) return res.status(404).json({ error: 'Admin not found.' });
+
   if (!validatePassword(new_password)) {
     return res.status(400).json({ error: PASSWORD_ERROR });
   }
+
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)) {
     return res.status(400).json({ error: 'A valid email address is required.' });
   }
 
-  const password_hash = bcrypt.hashSync(new_password, 10);
-  console.log('[AUTH_PROFILE_UPDATE]', { actor: 'admin', action: 'set-password' });
+  const password_hash = await bcrypt.hash(new_password, 10);
+
+  console.log('[AUTH_PROFILE_UPDATE]', {
+    actor: 'admin',
+    action: 'set-password'
+  });
 
   try {
-    db.prepare('UPDATE admins SET password_hash = ?, email = ?, must_change_password = 0 WHERE id = ?')
-      .run(password_hash, normalizedEmail, admin.id);
-    await db.persistAfterWrite();
-    res.json({ success: true, message: 'Password and email updated successfully.' });
+    await db.query(
+      'UPDATE admins SET password_hash = $1, email = $2, must_change_password = FALSE WHERE id = $3',
+      [password_hash, normalizedEmail, admin.id]
+    );
+
+    res.json({
+      success: true,
+      message: 'Password and email updated successfully.'
+    });
   } catch (error) {
     return res.status(409).json({ error: 'That email is already in use.' });
   }
@@ -77,17 +120,44 @@ router.post('/set-password', async (req, res) => {
 
 router.post('/forgot-password/request', async (req, res) => {
   const email = normalizeEmail(req.body.email);
-  if (!email) return res.status(400).json({ error: 'A valid email address is required.' });
 
-  const admin = db.prepare('SELECT id FROM admins WHERE email = ?').get(email)
-    || db.prepare('SELECT id FROM admins WHERE lower(email) = ?').get(email);
-  if (!admin) return res.status(404).json({ error: 'No admin account was found for that email.' });
+  if (!email) {
+    return res.status(400).json({
+      error: 'A valid email address is required.'
+    });
+  }
+
+  let result = await db.query(
+    'SELECT id FROM admins WHERE email = $1 LIMIT 1',
+    [email]
+  );
+  let admin = result.rows[0];
+
+  if (!admin) {
+    result = await db.query(
+      'SELECT id FROM admins WHERE lower(email) = $1 LIMIT 1',
+      [email]
+    );
+    admin = result.rows[0];
+  }
+
+  if (!admin) {
+    return res.status(404).json({
+      error: 'No admin account was found for that email.'
+    });
+  }
 
   try {
     await issuePasswordResetOtp(email, 'admin');
-    return res.json({ success: true, message: 'Password reset code sent to your admin email.' });
+
+    return res.json({
+      success: true,
+      message: 'Password reset code sent to your admin email.'
+    });
   } catch (error) {
-    return res.status(503).json({ error: 'Unable to send the password reset email right now.' });
+    return res.status(503).json({
+      error: 'Unable to send the password reset email right now.'
+    });
   }
 });
 
@@ -97,76 +167,159 @@ router.post('/forgot-password/reset', async (req, res) => {
   const newPassword = req.body.password;
 
   if (!email || !/^\d{6}$/.test(code)) {
-    return res.status(400).json({ error: 'A valid email and 6-digit reset code are required.' });
+    return res.status(400).json({
+      error: 'A valid email and 6-digit reset code are required.'
+    });
   }
+
   if (!validatePassword(newPassword)) {
-    return res.status(400).json({ error: PASSWORD_ERROR });
+    return res.status(400).json({
+      error: PASSWORD_ERROR
+    });
   }
 
-  const validation = consumePasswordResetOtp(email, code, 'admin');
+  const validation = await consumePasswordResetOtp(email, code, 'admin');
+
   if (!validation.valid) {
-    return res.status(400).json({ error: validation.reason });
+    return res.status(400).json({
+      error: validation.reason
+    });
   }
 
-  const admin = db.prepare('SELECT id FROM admins WHERE email = ?').get(email)
-    || db.prepare('SELECT id FROM admins WHERE lower(email) = ?').get(email);
+  let result = await db.query(
+    'SELECT id FROM admins WHERE email = $1 LIMIT 1',
+    [email]
+  );
+  let admin = result.rows[0];
+
   if (!admin) {
-    return res.status(404).json({ error: 'Admin account not found.' });
+    result = await db.query(
+      'SELECT id FROM admins WHERE lower(email) = $1 LIMIT 1',
+      [email]
+    );
+    admin = result.rows[0];
   }
 
-  db.prepare('UPDATE admins SET password_hash = ?, must_change_password = 0 WHERE id = ?')
-    .run(bcrypt.hashSync(newPassword, 10), admin.id);
-  markPasswordResetOtpUsed(validation.record.id);
-  await db.persistAfterWrite();
+  if (!admin) {
+    return res.status(404).json({
+      error: 'Admin account not found.'
+    });
+  }
 
-  return res.json({ success: true, message: 'Password reset successful.' });
+  const passwordHash = await bcrypt.hash(newPassword, 10);
+
+  await db.query(
+    'UPDATE admins SET password_hash = $1, must_change_password = FALSE WHERE id = $2',
+    [passwordHash, admin.id]
+  );
+
+  await markPasswordResetOtpUsed(validation.record.id);
+
+  return res.json({
+    success: true,
+    message: 'Password reset successful.'
+  });
 });
 
-// Profile
-router.get('/me', requireAdminSession, (req, res) => {
-  const admin = db.prepare('SELECT id, name, email, profile_image_url, must_change_password FROM admins WHERE id = ?').get(req.admin.id);
-  res.json(admin);
+router.get('/me', requireAdminSession, async (req, res) => {
+  const result = await db.query(
+    'SELECT id, name, email, profile_image_url, must_change_password FROM admins WHERE id = $1 LIMIT 1',
+    [req.admin.id]
+  );
+
+  res.json(result.rows[0]);
 });
 
 router.put('/change-password', requireAdminSession, async (req, res) => {
   const { currentPassword, newPassword } = req.body;
-  const admin = db.prepare('SELECT id, name, email, password_hash FROM admins WHERE id = ?').get(req.admin.id);
-  if (!bcrypt.compareSync(currentPassword, admin.password_hash)) {
-    return res.status(401).json({ error: 'Current password is incorrect.' });
+
+  const result = await db.query(
+    'SELECT id, name, email, password_hash FROM admins WHERE id = $1 LIMIT 1',
+    [req.admin.id]
+  );
+  const admin = result.rows[0];
+
+  if (!admin) {
+    return res.status(404).json({ error: 'Admin not found.' });
   }
+
+  if (!await bcrypt.compare(currentPassword, admin.password_hash)) {
+    return res.status(401).json({
+      error: 'Current password is incorrect.'
+    });
+  }
+
   if (!validatePassword(newPassword)) {
-    return res.status(400).json({ error: PASSWORD_ERROR });
+    return res.status(400).json({
+      error: PASSWORD_ERROR
+    });
   }
-  db.prepare('UPDATE admins SET password_hash = ? WHERE id = ?').run(bcrypt.hashSync(newPassword, 10), admin.id);
-  await db.persistAfterWrite();
+
+  const passwordHash = await bcrypt.hash(newPassword, 10);
+
+  await db.query(
+    'UPDATE admins SET password_hash = $1 WHERE id = $2',
+    [passwordHash, admin.id]
+  );
+
   res.json({ success: true });
 });
 
 router.put('/change-email', requireAdminSession, async (req, res) => {
   const { newEmail, currentPassword } = req.body;
-  const admin = db.prepare('SELECT id, name, email, password_hash FROM admins WHERE id = ?').get(req.admin.id);
-  if (!bcrypt.compareSync(currentPassword, admin.password_hash)) {
-    return res.status(401).json({ error: 'Current password is incorrect.' });
+
+  const result = await db.query(
+    'SELECT id, name, email, password_hash FROM admins WHERE id = $1 LIMIT 1',
+    [req.admin.id]
+  );
+  const admin = result.rows[0];
+
+  if (!admin) {
+    return res.status(404).json({ error: 'Admin not found.' });
   }
+
+  if (!await bcrypt.compare(currentPassword, admin.password_hash)) {
+    return res.status(401).json({
+      error: 'Current password is incorrect.'
+    });
+  }
+
   try {
     const normalizedEmail = normalizeEmail(newEmail);
-    if (!normalizedEmail) return res.status(400).json({ error: 'A valid email address is required.' });
-    db.prepare('UPDATE admins SET email = ? WHERE id = ?').run(normalizedEmail, admin.id);
-    await db.persistAfterWrite();
+
+    if (!normalizedEmail) {
+      return res.status(400).json({
+        error: 'A valid email address is required.'
+      });
+    }
+
+    await db.query(
+      'UPDATE admins SET email = $1 WHERE id = $2',
+      [normalizedEmail, admin.id]
+    );
+
     res.json({ success: true });
   } catch (err) {
-    res.status(409).json({ error: 'That email is already in use.' });
+    res.status(409).json({
+      error: 'That email is already in use.'
+    });
   }
 });
 
-// Profile picture: accepts a URL for now (not a file upload — keeps this
-// reliable without adding multer/file-storage complexity). Codex: if a real
-// file upload is wanted later, that's a separate follow-up, not part of this.
 router.put('/profile-picture', requireAdminSession, async (req, res) => {
   const { image_url } = req.body;
-  if (!image_url) return res.status(400).json({ error: 'image_url is required.' });
-  db.prepare('UPDATE admins SET profile_image_url = ? WHERE id = ?').run(image_url, req.admin.id);
-  await db.persistAfterWrite();
+
+  if (!image_url) {
+    return res.status(400).json({
+      error: 'image_url is required.'
+    });
+  }
+
+  await db.query(
+    'UPDATE admins SET profile_image_url = $1 WHERE id = $2',
+    [image_url, req.admin.id]
+  );
+
   res.json({ success: true });
 });
 

@@ -9,9 +9,11 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@prisma/client": "^7.10.0",
     "country-state-city": "^3.2.1",
     "framer-motion": "^11.3.0",
     "lucide-react": "^0.400.0",
+    "pg": "^8.23.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-helmet-async": "^3.0.0",
@@ -21,6 +23,7 @@
     "@vitejs/plugin-react": "^4.3.1",
     "autoprefixer": "^10.4.20",
     "postcss": "^8.4.41",
+    "prisma": "^7.10.0",
     "tailwindcss": "^3.4.10",
     "vite": "^6.0.0"
   }

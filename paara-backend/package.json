@@ -1,7 +1,7 @@
 {
   "name": "paara-backend",
   "version": "1.0.0",
-  "description": "Backend for Paara jewellery e-commerce site — SQLite + Express + Razorpay",
+  "description": "Backend for Paara jewellery e-commerce site — PostgreSQL + Express + PayU",
   "main": "server.js",
   "scripts": {
     "validate": "node --check api/index.js && node --check server.js",
@@ -22,6 +22,7 @@
     "multer": "^1.4.5-lts.1",
     "nodemailer": "^9.0.6",
     "pdfkit": "^0.20.1",
+    "pg": "^8.23.0",
     "qrcode": "^1.5.4",
     "razorpay": "^2.9.4",
     "twilio": "^6.1.0"

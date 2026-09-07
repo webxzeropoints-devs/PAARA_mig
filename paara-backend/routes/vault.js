@@ -1,67 +1,166 @@
 const express = require('express');
-const db = require('../db/database');
+const db = require('../db/database.pg');
 const publicImageUrl = require('../utils/publicImageUrl');
 
 const router = express.Router();
-// GET /api/vault/today — products released today (the homepage Vault strip)
-router.get('/today', (req, res) => {
-  const products = db
-    .prepare(`
+
+// GET /api/vault/today
+router.get('/today', async (req, res) => {
+  try {
+    const result = await db.query(`
       SELECT p.*, c.name AS category_name
-      FROM products p JOIN categories c ON c.id = p.category_id
-      WHERE p.is_active = 1 AND p.is_vault = 1
+      FROM products p
+      JOIN categories c ON c.id = p.category_id
+      WHERE p.is_active = TRUE
+        AND p.is_vault = TRUE
       ORDER BY p.created_at DESC
-    `)
-    .all();
-  const imagesForProduct = db.prepare(
-    'SELECT image_url FROM product_images WHERE product_id = ? ORDER BY sort_order ASC'
-  );
-  products.forEach((product) => {
-    product.images = imagesForProduct.all(product.id).map((image) => publicImageUrl(image.image_url)).filter(Boolean);
-  });
-  res.json(products);
+    `);
+
+    const products = result.rows;
+
+    if (products.length > 0) {
+      const productIds = products.map((product) => product.id);
+
+      const imageResult = await db.query(`
+        SELECT product_id, image_url
+        FROM product_images
+        WHERE product_id = ANY($1::int[])
+        ORDER BY sort_order ASC, id ASC
+      `, [productIds]);
+
+      const imagesByProduct = new Map();
+
+      for (const image of imageResult.rows) {
+        if (!imagesByProduct.has(image.product_id)) {
+          imagesByProduct.set(image.product_id, []);
+        }
+
+        imagesByProduct.get(image.product_id).push(
+          publicImageUrl(image.image_url)
+        );
+      }
+
+      for (const product of products) {
+        product.images = (imagesByProduct.get(product.id) || [])
+          .filter(Boolean);
+      }
+    }
+
+    return res.json(products);
+  } catch (error) {
+    console.error('[VAULT_TODAY_FAILED]', error.message);
+
+    return res.status(500).json({
+      error: 'Could not load today\'s vault products.',
+    });
+  }
 });
 
-// GET /api/vault/selected — public curated selection used by the homepage.
-router.get('/selected', (req, res) => {
-  const products = db.prepare(`
-    SELECT p.*, c.name AS category_name
-    FROM vault_products vp
-    JOIN products p ON p.id = vp.product_id
-    JOIN categories c ON c.id = p.category_id
-    WHERE p.is_active = 1
-    ORDER BY vp.sort_order ASC
-  `).all();
-  const imagesForProduct = db.prepare('SELECT image_url FROM product_images WHERE product_id = ? ORDER BY sort_order ASC');
-  products.forEach((product) => { product.images = imagesForProduct.all(product.id).map((image) => publicImageUrl(image.image_url)).filter(Boolean); });
-  res.json(products);
+// GET /api/vault/selected
+router.get('/selected', async (req, res) => {
+  try {
+    const result = await db.query(`
+      SELECT p.*, c.name AS category_name
+      FROM vault_products vp
+      JOIN products p ON p.id = vp.product_id
+      JOIN categories c ON c.id = p.category_id
+      WHERE p.is_active = TRUE
+      ORDER BY vp.sort_order ASC
+    `);
+
+    const products = result.rows;
+
+    if (products.length > 0) {
+      const productIds = products.map((product) => product.id);
+
+      const imageResult = await db.query(`
+        SELECT product_id, image_url
+        FROM product_images
+        WHERE product_id = ANY($1::int[])
+        ORDER BY sort_order ASC, id ASC
+      `, [productIds]);
+
+      const imagesByProduct = new Map();
+
+      for (const image of imageResult.rows) {
+        if (!imagesByProduct.has(image.product_id)) {
+          imagesByProduct.set(image.product_id, []);
+        }
+
+        imagesByProduct.get(image.product_id).push(
+          publicImageUrl(image.image_url)
+        );
+      }
+
+      for (const product of products) {
+        product.images = (imagesByProduct.get(product.id) || [])
+          .filter(Boolean);
+      }
+    }
+
+    return res.json(products);
+  } catch (error) {
+    console.error('[VAULT_SELECTED_FAILED]', error.message);
+
+    return res.status(500).json({
+      error: 'Could not load selected vault products.',
+    });
+  }
 });
 
-// GET /api/vault/archive — past drop days, grouped by date (for "missed a drop?")
-router.get('/archive', (req, res) => {
-  const days = db
-    .prepare(`
-      SELECT date(release_date) AS drop_date, COUNT(*) AS item_count
+// GET /api/vault/archive
+router.get('/archive', async (req, res) => {
+  try {
+    const result = await db.query(`
+      SELECT
+        split_part(release_date, ' ', 1) AS drop_date,
+        COUNT(*)::int AS item_count
       FROM products
-      WHERE is_active = 1 AND date(release_date) < date('now')
-      GROUP BY date(release_date)
+      WHERE is_active = TRUE
+        AND release_date IS NOT NULL
+        AND release_date < to_char(
+          CURRENT_TIMESTAMP,
+          'YYYY-MM-DD HH24:MI:SS'
+        )
+      GROUP BY split_part(release_date, ' ', 1)
       ORDER BY drop_date DESC
       LIMIT 30
-    `)
-    .all();
-  res.json(days);
+    `);
+
+    return res.json(result.rows);
+  } catch (error) {
+    console.error('[VAULT_ARCHIVE_FAILED]', error.message);
+
+    return res.status(500).json({
+      error: 'Could not load vault archive.',
+    });
+  }
 });
 
-// GET /api/vault/next — countdown target: earliest future release_date
-router.get('/next', (req, res) => {
-  const row = db
-    .prepare(`
-      SELECT MIN(datetime(release_date)) AS next_drop
+// GET /api/vault/next
+router.get('/next', async (req, res) => {
+  try {
+    const result = await db.query(`
+      SELECT MIN(release_date) AS next_drop
       FROM products
-      WHERE is_active = 1 AND datetime(release_date) > datetime('now')
-    `)
-    .get();
-  res.json({ next_drop: row.next_drop || null });
+      WHERE is_active = TRUE
+        AND release_date IS NOT NULL
+        AND release_date > to_char(
+          CURRENT_TIMESTAMP,
+          'YYYY-MM-DD HH24:MI:SS'
+        )
+    `);
+
+    return res.json({
+      next_drop: result.rows[0]?.next_drop || null,
+    });
+  } catch (error) {
+    console.error('[VAULT_NEXT_FAILED]', error.message);
+
+    return res.status(500).json({
+      error: 'Could not load the next vault release.',
+    });
+  }
 });
 
 module.exports = router;

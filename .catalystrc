@@ -1,0 +1,30 @@
+{
+  "defaults": {
+    "project": 1,
+    "env": 1
+  },
+  "actives": {
+    "project": 1,
+    "env": 1
+  },
+  "projects": [
+    {
+      "idx": 1,
+      "id": "64283000000013050",
+      "name": "PAARA",
+      "domain": {
+        "id": "50045676810",
+        "name": "paara-60086546888.development"
+      },
+      "timezone": "Asia/Kolkata",
+      "env": [
+        {
+          "idx": 1,
+          "id": "60086546888",
+          "name": "Development",
+          "type": 3
+        }
+      ]
+    }
+  ]
+}

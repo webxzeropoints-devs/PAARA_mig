@@ -1,15 +1,58 @@
-# Paara. — Backend (Node + Express + SQLite + Razorpay)
+# Paara. — Backend (Node + Express + PostgreSQL + PayU)
 
 ## Setup
 
 ```bash
 npm install
-cp .env.example .env
-# then edit .env with your real Razorpay test keys (from dashboard.razorpay.com/app/keys)
-
-npm run init-db     # creates paara.db and seeds cities/categories/sample products
 npm start            # runs on http://localhost:4000
 ```
+
+## Zoho Catalyst AppSail deployment preparation
+
+Deploy the `paara-backend` directory as a Catalyst-managed Node.js AppSail
+service. No AppSail-specific file is required when deploying from the Catalyst
+console; for CLI deployment, use the same directory as the build path and
+provide the startup command explicitly.
+
+Build and start commands:
+
+```text
+Build: npm install
+Start: npm start
+```
+
+The equivalent Catalyst CLI deployment command is:
+
+```text
+catalyst deploy appsail --name paara-backend --build-path <absolute-paara-backend-path> --stack "NodeJS 20" --command "npm start"
+```
+
+Use a current Catalyst-supported Node.js stack (Node.js 20 or newer). AppSail
+provides `X_ZOHO_CATALYST_LISTEN_PORT`; the server uses it first, then falls
+back to `PORT` and local port `4000`.
+
+Configure these environment variables in AppSail without committing their
+values:
+
+- `DATABASE_URL`
+- `JWT_SECRET`
+- `ADMIN_API_KEY`
+- `FRONTEND_URL` (comma-separated HTTPS origin(s) for the Zoho Slate frontend)
+- `PAYU_MERCHANT_KEY`
+- `PAYU_MERCHANT_SALT`
+- `PAYU_ENV=test`
+- `PAYU_SUCCESS_URL`
+- `PAYU_FAILURE_URL`
+- Email, WhatsApp, and optional Blob variables required by enabled features
+
+`GET /api/health` is the health check endpoint. The future Slate origin must be
+included in `FRONTEND_URL`; credentials and PayU callbacks must use HTTPS.
+
+AppSail local filesystem storage is not a durable shared upload store. Product
+and homepage uploads currently write to `public/uploads` in the non-serverless
+runtime, so persistent AppSail uploads require a follow-up migration to
+Catalyst Stratus or another approved object-storage backend before production
+use. PostgreSQL remains the source of truth for migrated application data.
 
 ## What's included
 
@@ -23,8 +66,8 @@ npm start            # runs on http://localhost:4000
 | `routes/vault.js` | Today's drop, drop archive, countdown to next drop |
 | `routes/addresses.js` | Authenticated saved-address list and creation endpoints used by checkout |
 | `routes/orders.js` | Creates an order with **server-recalculated** prices — the frontend cart is never trusted |
-| `routes/payment.js` | Razorpay order creation, signature verification, and webhook |
-| `public/checkout.js` | Frontend script that drives the Razorpay Checkout.js modal |
+| `routes/payment.js` | PayU hosted checkout, callback verification, and webhook |
+| `public/checkout.js` | Legacy static helper for PayU hosted checkout |
 
 ## Editing your 10 city shipping rates
 
@@ -32,21 +75,19 @@ Open `db/init.js` and change the `cities` array — city name + flat rate in rup
 
 **Note on distance-based shipping:** the km fallback needs a lat/lng for the customer's address. Pincode → lat/lng isn't wired up yet — the cleanest free option is the India Post Pincode API, or you can geocode once at checkout using any pincode-to-coordinates service and pass `lat`/`lng` when saving an address. Until that's wired up, addresses outside your 10 cities will get the `SHIPPING_MAX_CAP` default — safe, but worth finishing before launch.
 
-## Razorpay setup checklist
+## PayU test setup checklist
 
-1. Sign up at razorpay.com → Dashboard → Settings → API Keys → generate **test mode** keys first.
-2. Put `RAZORPAY_KEY_ID` and `RAZORPAY_KEY_SECRET` in `.env`.
-3. For the webhook (Settings → Webhooks in the dashboard): point it at `https://yourdomain.com/api/payment/webhook`, subscribe to `payment.captured` and `payment.failed`, and put the webhook secret it gives you into `RAZORPAY_WEBHOOK_SECRET`.
-4. Test with Razorpay's test card `4111 1111 1111 1111`, any future expiry, any CVV.
-5. Only switch `rzp_test_` keys to `rzp_live_` once you've tested the full flow end to end.
+1. Configure `PAYU_MERCHANT_KEY`, `PAYU_MERCHANT_SALT`, `PAYU_ENV=test`, `PAYU_SUCCESS_URL`, and `PAYU_FAILURE_URL`.
+2. Configure the PayU payment webhook URL as `https://yourdomain.com/api/payment/webhook`.
+3. Use only PayU's test credentials and test checkout until the AppSail migration is approved.
 
 ## The payment flow, end to end
 
-1. Frontend sends cart items + address → `POST /api/orders` → backend re-fetches every product's real price, computes GST + shipping, saves an order row, returns the total.
-2. Frontend calls `POST /api/payment/create-razorpay-order` with that order's id → backend opens a Razorpay order for the exact stored amount.
-3. Razorpay's Checkout.js modal opens (see `public/checkout.js`), customer pays.
-4. On success, frontend sends the three values Razorpay returns to `POST /api/payment/verify` → backend recomputes the HMAC signature and only *then* marks the order paid and decrements stock.
-5. The webhook (`POST /api/payment/webhook`) is a safety net that does the same thing server-to-server, in case step 4 never fires (tab closed, network drop, etc).
+1. Frontend sends cart items + address → `POST /api/orders` → backend re-fetches every product's real price, computes GST + shipping, saves an unpaid PayU order.
+2. Frontend calls `POST /api/payment/create` with that order's id → backend returns a signed PayU test checkout form.
+3. PayU hosts checkout and posts to the configured success/failure callback.
+4. Backend validates the response hash and calls PayU `verify_payment` before marking the order paid and decrementing stock.
+5. `POST /api/payment/webhook` provides an idempotent asynchronous payment notification path.
 
 ## Not yet included (next steps)
 

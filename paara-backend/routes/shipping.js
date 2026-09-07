@@ -1,21 +1,48 @@
 const express = require('express');
 const { calculateShipping } = require('../utils/shipping');
-const db = require('../db/database');
+const db = require('../db/database.pg');
 
 const router = express.Router();
 
-// GET /api/shipping/cities — the 10 named cities with flat rates (for a dropdown, etc.)
-router.get('/cities', (req, res) => {
-  res.json(db.prepare('SELECT name, flat_shipping_rate FROM cities ORDER BY name').all());
+// GET /api/shipping/cities
+router.get('/cities', async (req, res) => {
+  try {
+    const result = await db.query(
+      'SELECT name, flat_shipping_rate FROM cities ORDER BY name'
+    );
+
+    return res.json(result.rows);
+  } catch (error) {
+    console.error('[SHIPPING_CITIES_FAILED]', error.message);
+
+    return res.status(500).json({
+      error: 'Could not load shipping cities.',
+    });
+  }
 });
 
-// POST /api/shipping/quote  { city } or { lat, lng }
+// POST /api/shipping/quote
 router.post('/quote', (req, res) => {
-  const { city, state, payment_method = 'razorpay', total_weight_kg = 0.1 } = req.body;
+  const {
+    city,
+    state,
+    payment_method = 'payu',
+    total_weight_kg = 0.1,
+  } = req.body || {};
+
   try {
-    return res.json(calculateShipping({ city, state, paymentMethod: payment_method, totalWeightKg: total_weight_kg }));
+    return res.json(
+      calculateShipping({
+        city,
+        state,
+        paymentMethod: payment_method,
+        totalWeightKg: total_weight_kg,
+      })
+    );
   } catch (error) {
-    return res.status(400).json({ error: error.message });
+    return res.status(400).json({
+      error: error.message,
+    });
   }
 });
 

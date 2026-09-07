@@ -1,327 +1,234 @@
 const express = require('express');
-const crypto = require('crypto');
-const db = require('../db/database');
-const razorpay = require('../utils/razorpay');
-const {
-  getPaymentProvider,
-  MANUAL_UPI_PENDING_STATUS,
-  MANUAL_UPI_VERIFIED_STATUS,
-  MANUAL_UPI_REJECTED_STATUS,
-  MANUAL_UPI_CONFIRMED_STATUS,
-} = require('../utils/paymentProviders');
+const db = require('../db/database.pg');
 const { requireAuth } = require('../middleware/auth');
+const { getPaymentProvider } = require('../utils/paymentProviders');
+const {
+  generateResponseHash,
+  hashesMatch,
+  getPayuConfig,
+  verifyPayment,
+} = require('../utils/payu');
 const { trySendEmail } = require('../utils/email');
 const { createInvoicePdf } = require('../utils/invoice');
 const { maskSensitiveText } = require('../utils/validate');
 const { createOrder } = require('./orders');
 const { processLoyaltyOrder } = require('../services/loyalty');
-const QRCode = require('qrcode');
 
 const router = express.Router();
 
-router.post('/create-upi', requireAuth, async (req, res) => {
+async function markOrderPaid(orderId, paymentReference) {
+  const client = await db.pool.connect();
   try {
-    const upiId = String(process.env.UPI_ID || '').trim();
-    const payeeName = String(process.env.UPI_PAYEE_NAME || '').trim();
-
-    const order = createOrder({
-      customerId: req.customer.id,
-      items: req.body?.items,
-      addressId: req.body?.address_id,
-      paymentMethod: 'manual_upi',
-    });
-    await db.persistAfterWrite();
-    if (!upiId || !payeeName) {
-      return res.status(201).json({
-        order_id: order.order_id,
-        order_number: order.order_number,
-        payment_method: 'UPI',
-        payment_status: order.payment_status,
-        amount: Number(order.total_amount),
-        order,
-        payment_available: false,
-        payment_error: 'UPI payment is not configured. Your order was saved; please contact support to complete payment.',
-      });
-    }
-    const amount = Number(order.total_amount);
-    const deepLink = `upi://pay?pa=${encodeURIComponent(upiId)}&pn=${encodeURIComponent(payeeName)}&am=${amount.toFixed(2)}&tn=${encodeURIComponent(String(order.order_id))}&cu=INR`;
-    const qrCode = await QRCode.toDataURL(deepLink, { errorCorrectionLevel: 'M', margin: 1, width: 320 });
-
-    return res.status(201).json({
-      order_id: order.order_id,
-      order_number: order.order_number,
-      payment_method: 'UPI',
-      payment_status: 'pending_verification',
-      amount,
-      deep_link: deepLink,
-      qr_code: qrCode,
-      qr_code_url: qrCode,
-      payee_name: payeeName,
-      upi_id: upiId,
-      order,
-    });
-  } catch (error) {
-    console.error('[UPI_CREATE_FAILED]', { message: maskSensitiveText(error.message), name: error.name });
-    return res.status(400).json({ error: error.message || 'Could not create UPI payment.' });
-  }
-});
-
-const markOrderPaid = db.transaction((orderId, paymentId) => {
-  const updated = db.prepare(`
-    UPDATE orders
-    SET status = 'Order Confirmed', payment_status = 'paid', razorpay_payment_id = ?,
-        gift_card_eligible_amount = COALESCE(
-          gift_card_eligible_amount,
-          (SELECT r.gift_card_value FROM gift_card_rules r
-           WHERE r.is_active = 1 AND r.product_id IN
-             (SELECT oi.product_id FROM order_items oi WHERE oi.order_id = orders.id)
-           ORDER BY r.id ASC LIMIT 1)
-        )
-    WHERE id = ? AND payment_status != 'paid'
-  `).run(paymentId, orderId);
-  if (!updated.changes) return false;
-
-  const items = db.prepare('SELECT product_id, quantity FROM order_items WHERE order_id = ?').all(orderId);
-  const decrementStock = db.prepare('UPDATE products SET stock = stock - ? WHERE id = ?');
-  items.forEach((item) => decrementStock.run(item.quantity, item.product_id));
-  return true;
-});
-
-/**
- * POST /api/payment/create-razorpay-order
- * body: { order_id }
- *
- * Creates a Razorpay order for an amount that was already computed and
- * stored server-side in POST /api/orders — the amount is never taken
- * from the request body.
- */
-router.post('/create', requireAuth, async (req, res) => {
-  const { order_id, payment_method = 'manual_upi' } = req.body || {};
-  const order = db.prepare('SELECT * FROM orders WHERE id = ? AND customer_id = ?').get(order_id, req.customer.id);
-  if (!order) return res.status(404).json({ error: 'Order not found.' });
-
-  const provider = getPaymentProvider(payment_method);
-  const payload = await provider.create(order, { id: req.customer.id, name: req.customer.name }, {
-    baseUrl: process.env.APP_URL || 'https://www.paarajewellery.in',
-  });
-
-  if (payment_method === 'manual_upi') {
-    db.prepare('UPDATE orders SET payment_method = ? WHERE id = ?')
-      .run('manual_upi', order.id);
-  }
-
-  await db.persistAfterWrite();
-  return res.json(payload);
-});
-
-router.post('/create-razorpay-order', requireAuth, async (req, res) => {
-  const { order_id } = req.body;
-
-  const order = db
-    .prepare('SELECT * FROM orders WHERE id = ? AND customer_id = ?')
-    .get(order_id, req.customer.id);
-
-  if (!order) return res.status(404).json({ error: 'Order not found.' });
-  if (order.payment_status === 'paid') {
-    return res.status(400).json({ error: 'This order has already been paid.' });
-  }
-
-  if (!razorpay || !razorpay.orders || typeof razorpay.orders.create !== 'function') {
-    return res.status(503).json({ error: 'Razorpay is not configured. Please use the manual UPI payment option.' });
-  }
-
-  try {
-    const rzpOrder = await razorpay.orders.create({
-      amount: Math.round(order.total_amount * 100), // paise
-      currency: 'INR',
-      receipt: `paara_order_${order.id}`,
-      notes: { paara_order_id: String(order.id), customer_id: String(req.customer.id) }
-    });
-
-    db.prepare('UPDATE orders SET razorpay_order_id = ? WHERE id = ?').run(rzpOrder.id, order.id);
-
-    await db.persistAfterWrite();
-    res.json({
-      key_id: process.env.RAZORPAY_KEY_ID,     // safe to expose — it's the public key
-      razorpay_order_id: rzpOrder.id,
-      amount: rzpOrder.amount,
-      currency: rzpOrder.currency,
-      paara_order_id: order.id
-    });
-  } catch (err) {
-    console.error('Razorpay order creation failed:', { message: maskSensitiveText(err.message), name: err.name });
-    res.status(502).json({ error: 'Could not initiate payment. Please try again.' });
-  }
-});
-
-/**
- * POST /api/payment/verify
- * body: { paara_order_id, razorpay_order_id, razorpay_payment_id, razorpay_signature }
- *
- * This is the step that actually confirms payment. Razorpay's checkout
- * modal returns these three values to the frontend on success — but they
- * must be verified here, server-side, before we ever mark an order paid.
- * Never trust a "payment succeeded" message from the frontend alone.
- */
-router.post('/verify', requireAuth, async (req, res) => {
-  const { paara_order_id, razorpay_order_id, razorpay_payment_id, razorpay_signature, payment_method, payment_reference, UTR } = req.body;
-
-  const order = db
-    .prepare('SELECT * FROM orders WHERE id = ? AND customer_id = ?')
-    .get(paara_order_id, req.customer.id);
-  if (!order) return res.status(404).json({ error: 'Order not found.' });
-
-  const paymentMethod = String(payment_method || order.payment_method || 'razorpay').trim().toLowerCase();
-
-  if (paymentMethod === 'manual_upi') {
-    const reference = String(payment_reference || UTR || '').trim();
-    if (!reference) {
-      return res.status(400).json({ error: 'UTR is required for manual UPI verification.' });
-    }
-
-    const updated = db.prepare(`
+    await client.query('BEGIN');
+    const updated = await client.query(`
       UPDATE orders
-      SET payment_status = ?,
-          payment_method = 'manual_upi',
-          payment_reference = ?,
-          payment_verified_at = NULL,
-          payment_rejected_at = NULL,
-          status = ?
-      WHERE id = ? AND customer_id = ?
-    `).run(MANUAL_UPI_PENDING_STATUS, reference, MANUAL_UPI_CONFIRMED_STATUS, order.id, req.customer.id);
+      SET status = 'Order Confirmed',
+          payment_status = 'paid',
+          payment_method = 'payu',
+          payment_reference = $1,
+          payment_verified_at = to_char(CURRENT_TIMESTAMP, 'YYYY-MM-DD HH24:MI:SS'),
+          payment_rejected_at = NULL
+      WHERE id = $2
+        AND payment_status <> 'paid'
+      RETURNING id
+    `, [paymentReference, orderId]);
 
-    if (!updated.changes) {
-      return res.status(400).json({ error: 'Unable to record UPI payment attempt.' });
+    if (updated.rowCount === 0) {
+      await client.query('ROLLBACK');
+      return false;
     }
 
-    await db.persistAfterWrite();
-    return res.json({
-      success: true,
-      order_id: order.id,
-      payment_status: MANUAL_UPI_PENDING_STATUS,
-      payment_method: 'manual_upi',
-      status: MANUAL_UPI_CONFIRMED_STATUS,
-      message: 'Order Confirmed! We\'ll notify you once it ships.'
-    });
+    const { rows: items } = await client.query(
+      'SELECT product_id, quantity FROM order_items WHERE order_id = $1',
+      [orderId]
+    );
+    for (const item of items) {
+      const stockUpdate = await client.query(
+        'UPDATE products SET stock = stock - $1 WHERE id = $2 AND stock >= $1 RETURNING id',
+        [item.quantity, item.product_id]
+      );
+      if (stockUpdate.rowCount === 0) {
+        throw new Error('Insufficient stock while confirming payment.');
+      }
+    }
+
+    await client.query('COMMIT');
+    return true;
+  } catch (error) {
+    try {
+      await client.query('ROLLBACK');
+    } catch {}
+    throw error;
+  } finally {
+    client.release();
   }
+}
 
-  if (!paara_order_id || !razorpay_order_id || !razorpay_payment_id || !razorpay_signature) {
-    return res.status(400).json({ error: 'Missing payment verification fields.' });
-  }
-
-  if (order.razorpay_order_id !== razorpay_order_id) {
-    return res.status(400).json({ error: 'Order mismatch.' });
-  }
-
-  const expectedSignature = crypto
-    .createHmac('sha256', process.env.RAZORPAY_KEY_SECRET)
-    .update(`${razorpay_order_id}|${razorpay_payment_id}`)
-    .digest('hex');
-
-  const expectedBuffer = Buffer.from(expectedSignature, 'utf8');
-  const receivedBuffer = Buffer.from(String(razorpay_signature), 'utf8');
-  const isValid = expectedBuffer.length === receivedBuffer.length
-    && crypto.timingSafeEqual(expectedBuffer, receivedBuffer);
-
-  if (!isValid) {
-    db.prepare('UPDATE orders SET status = ?, payment_status = ? WHERE id = ?')
-      .run('Order Confirmed', 'unpaid', order.id);
-    await db.persistAfterWrite();
-    return res.status(400).json({ error: 'Payment verification failed.' });
-  }
-
-  // Signature valid — mark the order paid, snapshot eligibility, and decrement stock once.
-  markOrderPaid(order.id, razorpay_payment_id);
-  const loyalty = processLoyaltyOrder(order.id, req.customer.id);
-  await db.persistAfterWrite();
-  sendPaidInvoice(order.id, req.customer.id).catch((error) => console.error('Invoice email flow failed:', { message: maskSensitiveText(error.message), name: error.name }));
-
-  res.json({ success: true, order_id: order.id, loyalty, message: 'Payment verified. Order confirmed.' });
-});
-
-async function sendPaidInvoice(orderId, customerId) {
-  const order = db.prepare('SELECT o.*, c.email, c.name FROM orders o JOIN customers c ON c.id = o.customer_id WHERE o.id = ? AND o.customer_id = ?').get(orderId, customerId);
+async function sendPaidInvoice(orderId) {
+  const { rows: orderRows } = await db.query(`
+    SELECT o.*, c.email, c.name
+    FROM orders o
+    JOIN customers c ON c.id = o.customer_id
+    WHERE o.id = $1
+  `, [orderId]);
+  const order = orderRows[0];
   if (!order) return;
-  const items = db.prepare('SELECT * FROM order_items WHERE order_id = ? ORDER BY id ASC').all(orderId);
-  const address = db.prepare('SELECT * FROM addresses WHERE id = ? AND customer_id = ?').get(order.address_id, customerId);
+
+  const { rows: items } = await db.query(
+    'SELECT * FROM order_items WHERE order_id = $1 ORDER BY id ASC',
+    [orderId]
+  );
+  const { rows: addressRows } = await db.query(
+    'SELECT * FROM addresses WHERE id = $1 AND customer_id = $2',
+    [order.address_id, order.customer_id]
+  );
+  const address = addressRows[0];
   const pdf = await createInvoicePdf(order, items, address);
-  const itemLines = items.map((item) => `${item.product_name} x ${item.quantity} @ INR ${item.unit_price} = INR ${item.line_total}`).join('\n');
-  const addressText = address ? `${address.line1}, ${address.city}, ${address.state} - ${address.pincode}` : 'Not available';
+  const itemLines = items
+    .map((item) => `${item.product_name} x ${item.quantity} @ INR ${item.unit_price} = INR ${item.line_total}`)
+    .join('\n');
+  const addressText = address
+    ? `${address.line1}, ${address.city}, ${address.state} - ${address.pincode}`
+    : 'Not available';
+
   await trySendEmail({
     to: order.email,
     subject: `Paara invoice for order ${order.order_number}`,
-    text: `Order ID: ${order.order_number}\nPayment ID: ${order.razorpay_payment_id}\n\nItems:\n${itemLines}\n\nTaxes: Included in product prices\nShipping: INR ${order.shipping_amount}\nTotal: INR ${order.total_amount}\nShipping address: ${addressText}`,
-    attachments: [{ filename: `paara-invoice-${order.order_number}.pdf`, content: pdf, contentType: 'application/pdf' }],
+    text: `Order ID: ${order.order_number}
+Payment Reference: ${order.payment_reference}
+
+Items:
+${itemLines}
+
+Taxes: Included in product prices
+Shipping: INR ${order.shipping_amount}
+Total: INR ${order.total_amount}
+Shipping address: ${addressText}`,
+    attachments: [{
+      filename: `paara-invoice-${order.order_number}.pdf`,
+      content: pdf,
+      contentType: 'application/pdf',
+    }],
   }, `invoice for order ${order.order_number}`);
 }
 
-/**
- * POST /api/payment/webhook
- * Razorpay server-to-server webhook — a safety net in case the customer
- * closes the tab right after paying, before the /verify call above fires.
- * Must be mounted with express.raw() (see server.js) so we can verify the
- * signature against the exact raw bytes Razorpay sent.
- *
- * Configure this URL + secret in: Razorpay Dashboard → Settings → Webhooks.
- */
-router.get('/provider/:method', requireAuth, async (req, res) => {
-  const method = String(req.params.method || '').trim().toLowerCase();
-  const orderId = Number.parseInt(String(req.query.order_id || ''), 10);
-  if (!Number.isInteger(orderId) || orderId < 1) {
-    return res.status(400).json({ error: 'A valid order_id is required.' });
+async function processPayuCallback(payload, expectedStatus) {
+  const config = getPayuConfig();
+  const txnid = String(payload.txnid || '').trim();
+  if (!txnid || !payload.hash || !hashesMatch(
+    generateResponseHash(payload, config.salt),
+    payload.hash
+  )) {
+    throw new Error('Invalid PayU response hash.');
   }
 
-  const order = db.prepare('SELECT * FROM orders WHERE id = ? AND customer_id = ?').get(orderId, req.customer.id);
-  if (!order) return res.status(404).json({ error: 'Order not found.' });
-
-  const provider = getPaymentProvider(method);
-  if (!provider || typeof provider.create !== 'function') {
-    return res.status(400).json({ error: 'Unsupported payment method.' });
+  const { rows } = await db.query(
+    'SELECT * FROM orders WHERE payment_reference = $1',
+    [txnid]
+  );
+  const order = rows[0];
+  if (!order) throw new Error('PayU transaction is not linked to an order.');
+  if (Number(payload.amount).toFixed(2) !== Number(order.total_amount).toFixed(2)) {
+    throw new Error('PayU amount mismatch.');
   }
 
-  const payload = await provider.create(order, { id: req.customer.id, name: req.customer.name }, { baseUrl: process.env.APP_URL || 'https://www.paarajewellery.in' });
-  res.json(payload);
+  if (String(payload.status || '').toLowerCase() !== expectedStatus) {
+    await db.query(
+      "UPDATE orders SET status = 'failed', payment_status = 'failed', payment_method = 'payu' WHERE id = $1 AND payment_status <> 'paid'",
+      [order.id]
+    );
+    return { orderId: order.id, paid: false, status: 'failed' };
+  }
+
+  const verification = await verifyPayment(txnid);
+  const details = verification?.transaction_details?.[txnid] || verification?.transaction_details?.[String(txnid)];
+  if (!details || String(details.status || '').toLowerCase() !== 'success') {
+    throw new Error('PayU server-side verification did not confirm payment.');
+  }
+  if (Number(details.amt || details.amount).toFixed(2) !== Number(order.total_amount).toFixed(2)) {
+    throw new Error('PayU verification amount mismatch.');
+  }
+
+  const reference = String(details.mihpayid || payload.mihpayid || txnid);
+  const newlyPaid = await markOrderPaid(order.id, reference);
+  if (newlyPaid) {
+    const loyalty = await processLoyaltyOrder(order.id, order.customer_id);
+    sendPaidInvoice(order.id).catch((error) => {
+      console.error('[INVOICE_EMAIL_FAILED]', {
+        message: maskSensitiveText(error.message),
+        name: error.name,
+      });
+    });
+    return { orderId: order.id, paid: true, newlyPaid: true, loyalty };
+  }
+  return { orderId: order.id, paid: true, newlyPaid: false };
+}
+
+router.get('/config', requireAuth, (req, res) => {
+  res.json({
+    provider: 'payu',
+    environment: 'test',
+    payment_methods: ['payu'],
+    hosted_checkout: true,
+  });
 });
 
-router.post('/webhook', async (req, res) => {
-  const signature = req.headers['x-razorpay-signature'];
-  if (!Buffer.isBuffer(req.body) || typeof signature !== 'string') {
-    return res.status(400).json({ error: 'Invalid webhook payload.' });
-  }
-  const expected = crypto
-    .createHmac('sha256', process.env.RAZORPAY_WEBHOOK_SECRET)
-    .update(req.body) // raw Buffer, see express.raw() in server.js
-    .digest('hex');
-
-  const expectedBuffer = Buffer.from(expected, 'utf8');
-  const signatureBuffer = Buffer.from(signature, 'utf8');
-  if (expectedBuffer.length !== signatureBuffer.length || !crypto.timingSafeEqual(expectedBuffer, signatureBuffer)) {
-    return res.status(400).json({ error: 'Invalid webhook signature.' });
-  }
-
-  let event;
+router.post(['/create', '/initiate'], requireAuth, async (req, res) => {
   try {
-    event = JSON.parse(req.body.toString('utf8'));
-  } catch {
-    return res.status(400).json({ error: 'Invalid webhook JSON.' });
-  }
+    const orderId = Number.parseInt(String(req.body?.order_id || ''), 10);
+    const { rows: orders } = await db.query(
+      'SELECT * FROM orders WHERE id = $1 AND customer_id = $2',
+      [orderId, req.customer.id]
+    );
+    const order = orders[0];
+    if (!order) return res.status(404).json({ error: 'Order not found.' });
+    if (order.payment_status === 'paid') return res.status(400).json({ error: 'This order has already been paid.' });
 
-  if (event.event === 'payment.captured') {
-    const rzpOrderId = event.payload.payment.entity.order_id;
-    const paymentId = event.payload.payment.entity.id;
-    const order = db.prepare('SELECT id FROM orders WHERE razorpay_order_id = ?').get(rzpOrderId);
-    if (order) markOrderPaid(order.id, paymentId);
+    const { rows: customers } = await db.query(
+      'SELECT name, email, phone FROM customers WHERE id = $1',
+      [req.customer.id]
+    );
+    const provider = getPaymentProvider('payu');
+    const payload = provider.create({
+      order,
+      customer: customers[0],
+      txnid: order.payment_reference && String(order.payment_reference).startsWith('PAARA-')
+        ? order.payment_reference
+        : undefined,
+    });
+    await db.query(
+      "UPDATE orders SET payment_method = 'payu', payment_reference = $1, payment_status = 'unpaid' WHERE id = $2 AND payment_status <> 'paid'",
+      [payload.txnid, order.id]
+    );
+    await db.persistAfterWrite();
+    return res.json(payload);
+  } catch (error) {
+    console.error('[PAYU_INITIATE_FAILED]', { message: maskSensitiveText(error.message), name: error.name });
+    return res.status(400).json({ error: error.message || 'Could not initiate PayU payment.' });
   }
-
-  if (event.event === 'payment.failed') {
-    const rzpOrderId = event.payload.payment.entity.order_id;
-    db.prepare(`
-      UPDATE orders SET status = 'failed' WHERE razorpay_order_id = ? AND status != 'paid'
-    `).run(rzpOrderId);
-  }
-
-  await db.persistAfterWrite();
-  res.json({ received: true });
 });
+
+router.post('/verify', requireAuth, async (req, res) => {
+  try {
+    const result = await processPayuCallback(req.body || {}, 'success');
+    return res.json({ success: result.paid, ...result });
+  } catch (error) {
+    return res.status(400).json({ error: error.message });
+  }
+});
+
+const payuCallback = (expectedStatus) => async (req, res) => {
+  try {
+    const result = await processPayuCallback(req.body || {}, expectedStatus);
+    return res.json({ received: true, ...result });
+  } catch (error) {
+    console.error('[PAYU_CALLBACK_FAILED]', { message: maskSensitiveText(error.message), name: error.name });
+    return res.status(400).json({ received: false, error: error.message });
+  }
+};
+
+router.post('/payu/success', payuCallback('success'));
+router.post('/payu/failure', payuCallback('failure'));
+router.post('/webhook', payuCallback('success'));
 
 module.exports = router;

@@ -38,3 +38,16 @@ Thumbs.db
 .idea/
 .vercel
 .env*
+.env
+.env.*
+!.env.example
+*.db
+*.db-wal
+*.db-shm
+migration-backup/
+node_modules/
+dist/
+*.zip
+.vercel/
+*.pg-backup.js
+*.sqlite-backup.js

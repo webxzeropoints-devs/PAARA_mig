@@ -1,0 +1,384 @@
+// PAARA Jewellery — PostgreSQL / Prisma schema
+// Built from the current SQLite schema.sql plus runtime columns/tables added
+// in db/init.js and server.js.
+//
+// IMPORTANT source reconciliation:
+// The supplied summary says "22 tables" after excluding phone_otps, but the
+// actual current schema contains 23 non-phone tables. This schema mirrors the
+// actual 23 active non-phone tables and excludes phone_otps as requested.
+//
+// SQLite timestamps are stored as TEXT in the current system, so timestamp
+// columns remain String here to preserve the exact stored values during export
+// and import. Runtime Prisma writes should provide the same string format.
+
+ generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model Category {
+  id        Int       @id @default(autoincrement())
+  name      String
+  slug      String    @unique
+  gender    String
+  vibe      String?
+  material  String?
+
+  products  Product[]
+
+  @@map("categories")
+}
+
+model Product {
+  id               Int               @id @default(autoincrement())
+  categoryId       Int               @map("category_id")
+  name             String
+  slug             String            @unique
+  description      String?
+  price            Float
+  weightKg         Float             @default(0.1) @map("weight_kg")
+  material         String?
+  subcategory      String?
+  stock            Int               @default(0)
+  isExclusive      Boolean           @default(false) @map("is_exclusive")
+  isBestseller     Boolean           @default(false) @map("is_bestseller")
+  releaseDate      String            @map("release_date")
+  isActive         Boolean           @default(true) @map("is_active")
+  isVault          Boolean           @default(false) @map("is_vault")
+  vaultSortOrder   Int               @default(0) @map("vault_sort_order")
+  imagesJson       String            @default("[]") @map("images_json")
+  createdAt        String            @default(dbgenerated("to_char(CURRENT_TIMESTAMP, 'YYYY-MM-DD HH24:MI:SS')")) @map("created_at")
+
+  category         Category          @relation(fields: [categoryId], references: [id])
+  images           ProductImage[]
+  orderItems       OrderItem[]
+  instagramReviews InstagramReview[]
+  giftCardRule     GiftCardRule?
+  wishlists        Wishlist[]
+  vaultProduct     VaultProduct?
+  tileProducts     TileProduct[]
+
+  @@index([releaseDate], map: "idx_products_release")
+  @@index([categoryId], map: "idx_products_category")
+  @@map("products")
+}
+
+model ProductImage {
+  id         Int     @id @default(autoincrement())
+  productId  Int     @map("product_id")
+  imageUrl   String  @map("image_url")
+  sortOrder  Int     @default(0) @map("sort_order")
+  isPrimary  Boolean @default(false) @map("is_primary")
+
+  product    Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@map("product_images")
+}
+
+model City {
+  id                Int   @id @default(autoincrement())
+  name              String @unique
+  flatShippingRate  Float @map("flat_shipping_rate")
+
+  @@map("cities")
+}
+
+model Customer {
+  id                   Int                   @id @default(autoincrement())
+  name                 String
+  email                String                @unique
+  phone                String?
+  passwordHash         String                @map("password_hash")
+  giftCardBalance      Float                 @default(1500) @map("gift_card_balance")
+  createdAt            String                @default(dbgenerated("to_char(CURRENT_TIMESTAMP, 'YYYY-MM-DD HH24:MI:SS')")) @map("created_at")
+
+  customerOrderDetails CustomerOrderDetail[]
+  addresses            Address[]
+  orders               Order[]
+  loyaltyCard          LoyaltyCard?
+  loyaltyStamps        LoyaltyStamp[]
+  wishlists            Wishlist[]
+
+  @@map("customers")
+}
+
+model EmailOtp {
+  id         Int      @id @default(autoincrement())
+  email      String
+  code       String
+  createdAt  String   @default(dbgenerated("to_char(CURRENT_TIMESTAMP, 'YYYY-MM-DD HH24:MI:SS')")) @map("created_at")
+  expiresAt  String   @map("expires_at")
+  verified   Boolean  @default(false)
+  attempts   Int      @default(0)
+
+  @@map("email_otps")
+}
+
+model PasswordResetOtp {
+  id         Int      @id @default(autoincrement())
+  email      String
+  code       String
+  userType   String   @map("user_type")
+  createdAt  String   @default(dbgenerated("to_char(CURRENT_TIMESTAMP, 'YYYY-MM-DD HH24:MI:SS')")) @map("created_at")
+  expiresAt  String   @map("expires_at")
+  used       Boolean  @default(false)
+  attempts   Int      @default(0)
+
+  @@index([email, userType], map: "idx_password_reset_otps_email_user")
+  @@map("password_reset_otps")
+}
+
+model CustomerOrderDetail {
+  id               Int      @id @default(autoincrement())
+  orderId          Int      @unique @map("order_id")
+  customerId       Int      @map("customer_id")
+  fullName         String   @map("full_name")
+  email            String
+  phone            String?
+  shippingLine1    String   @map("shipping_line1")
+  shippingLine2    String?  @map("shipping_line2")
+  shippingCity     String   @map("shipping_city")
+  shippingState    String   @map("shipping_state")
+  shippingPincode  String   @map("shipping_pincode")
+  shippingCountry  String   @default("India") @map("shipping_country")
+  billingDetails   String?  @map("billing_details")
+  submittedFields  String   @default("{}") @map("submitted_fields")
+  createdAt        String   @default(dbgenerated("to_char(CURRENT_TIMESTAMP, 'YYYY-MM-DD HH24:MI:SS')")) @map("created_at")
+
+  order            Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  customer         Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  @@map("customer_order_details")
+}
+
+model Address {
+  id          Int      @id @default(autoincrement())
+  customerId  Int      @map("customer_id")
+  line1       String
+  line2       String?
+  city        String
+  state       String
+  pincode     String
+  lat         Float?
+  lng         Float?
+  isDefault   Boolean  @default(false) @map("is_default")
+
+  customer    Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  orders      Order[]
+
+  @@index([customerId], map: "idx_addresses_customer")
+  @@map("addresses")
+}
+
+model Order {
+  id                      Int                  @id @default(autoincrement())
+  orderNumber             String?              @unique @map("order_number")
+  customerId              Int                  @map("customer_id")
+  addressId               Int                  @map("address_id")
+  subtotal                Float
+  gstAmount               Float                @map("gst_amount")
+  shippingAmount          Float                @map("shipping_amount")
+  totalAmount             Float                @map("total_amount")
+  status                  String               @default("Order Confirmed")
+  paymentStatus           String               @default("unpaid") @map("payment_status")
+  paymentMethod           String               @default("razorpay") @map("payment_method")
+  razorpayOrderId         String?              @map("razorpay_order_id")
+  razorpayPaymentId       String?              @map("razorpay_payment_id")
+  paymentReference        String?              @map("payment_reference")
+  paymentVerifiedAt      String?              @map("payment_verified_at")
+  paymentRejectedAt       String?              @map("payment_rejected_at")
+  giftCardEligibleAmount  Float?               @map("gift_card_eligible_amount")
+  giftCardGrantedAt       String?              @map("gift_card_granted_at")
+  giftCardGrantedBy       Int?                 @map("gift_card_granted_by")
+  createdAt               String               @default(dbgenerated("to_char(CURRENT_TIMESTAMP, 'YYYY-MM-DD HH24:MI:SS')")) @map("created_at")
+
+  customer                Customer             @relation(fields: [customerId], references: [id])
+  address                 Address              @relation(fields: [addressId], references: [id])
+  giftCardGranter         Admin?               @relation("OrderGiftCardGranter", fields: [giftCardGrantedBy], references: [id], onDelete: NoAction)
+  details                 CustomerOrderDetail?
+  items                   OrderItem[]
+  loyaltyStamp            LoyaltyStamp?
+
+  @@index([customerId], map: "idx_orders_customer")
+  @@map("orders")
+}
+
+model OrderItem {
+  id           Int      @id @default(autoincrement())
+  orderId      Int      @map("order_id")
+  productId    Int      @map("product_id")
+  productName  String   @map("product_name")
+  unitPrice    Float    @map("unit_price")
+  quantity     Int
+  lineTotal    Float    @map("line_total")
+
+  order        Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  product      Product  @relation(fields: [productId], references: [id])
+
+  @@index([orderId], map: "idx_order_items_order")
+  @@map("order_items")
+}
+
+model InstagramReview {
+  id                Int      @id @default(autoincrement())
+  productId         Int?     @map("product_id")
+  instagramPostUrl  String   @map("instagram_post_url")
+  imageUrl          String   @map("image_url")
+  caption           String?
+  likes             Int      @default(0)
+  sortOrder         Int      @default(0) @map("sort_order")
+  cachedAt          String   @default(dbgenerated("to_char(CURRENT_TIMESTAMP, 'YYYY-MM-DD HH24:MI:SS')")) @map("cached_at")
+  updatedAt         String   @default(dbgenerated("to_char(CURRENT_TIMESTAMP, 'YYYY-MM-DD HH24:MI:SS')")) @map("updated_at")
+
+  product           Product? @relation(fields: [productId], references: [id])
+
+  @@map("instagram_reviews")
+}
+
+model LoyaltyCard {
+  customerId        Int      @id @map("customer_id")
+  stampCount        Int      @default(0) @map("stamp_count")
+  firstStampAt      String?  @map("first_stamp_at")
+  expiresAt         String?  @map("expires_at")
+  completedAt       String?  @map("completed_at")
+  rewardRedeemedAt  String?  @map("reward_redeemed_at")
+  createdAt         String   @default(dbgenerated("to_char(CURRENT_TIMESTAMP, 'YYYY-MM-DD HH24:MI:SS')")) @map("created_at")
+  updatedAt         String   @default(dbgenerated("to_char(CURRENT_TIMESTAMP, 'YYYY-MM-DD HH24:MI:SS')")) @map("updated_at")
+
+  customer          Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  @@map("loyalty_cards")
+}
+
+model LoyaltyStamp {
+  id                 Int      @id @default(autoincrement())
+  customerId         Int      @map("customer_id")
+  orderId            Int      @unique @map("order_id")
+  awardedAt          String   @default(dbgenerated("to_char(CURRENT_TIMESTAMP, 'YYYY-MM-DD HH24:MI:SS')")) @map("awarded_at")
+  animationShownAt   String?  @map("animation_shown_at")
+
+  customer           Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  order              Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@index([customerId, awardedAt], map: "idx_loyalty_stamps_customer")
+  @@map("loyalty_stamps")
+}
+
+model GiftCardRule {
+  id             Int      @id @default(autoincrement())
+  productId      Int      @unique @map("product_id")
+  giftCardValue  Float    @map("gift_card_value")
+  isActive       Boolean  @default(true) @map("is_active")
+  createdAt      String   @default(dbgenerated("to_char(CURRENT_TIMESTAMP, 'YYYY-MM-DD HH24:MI:SS')")) @map("created_at")
+  updatedAt      String   @default(dbgenerated("to_char(CURRENT_TIMESTAMP, 'YYYY-MM-DD HH24:MI:SS')")) @map("updated_at")
+
+  product        Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@map("gift_card_rules")
+}
+
+model Wishlist {
+  id          Int      @id @default(autoincrement())
+  customerId  Int      @map("customer_id")
+  productId   Int      @map("product_id")
+  addedAt     String   @default(dbgenerated("to_char(CURRENT_TIMESTAMP, 'YYYY-MM-DD HH24:MI:SS')")) @map("added_at")
+
+  customer    Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  product     Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@unique([customerId, productId])
+  @@map("wishlist")
+}
+
+model Admin {
+  id                 Int       @id @default(autoincrement())
+  name               String
+  email              String    @unique
+  passwordHash       String    @map("password_hash")
+  profileImageUrl    String?   @map("profile_image_url")
+  mustChangePassword Boolean   @default(true) @map("must_change_password")
+  createdAt          String    @default(dbgenerated("to_char(CURRENT_TIMESTAMP, 'YYYY-MM-DD HH24:MI:SS')")) @map("created_at")
+
+  adminOtps          AdminOtp[]
+  giftCardOrders     Order[]   @relation("OrderGiftCardGranter")
+
+  @@map("admins")
+}
+
+model AdminOtp {
+  id          Int      @id @default(autoincrement())
+  adminId     Int      @map("admin_id")
+  otpCode     String   @map("otp_code")
+  expiresAt   String   @map("expires_at")
+  verified    Boolean  @default(false)
+  createdAt   String   @default(dbgenerated("to_char(CURRENT_TIMESTAMP, 'YYYY-MM-DD HH24:MI:SS')")) @map("created_at")
+
+  admin       Admin    @relation(fields: [adminId], references: [id])
+
+  @@map("admin_otps")
+}
+
+model Coupon {
+  id             Int      @id @default(autoincrement())
+  code           String   @unique
+  description    String?
+  discountType   String   @map("discount_type")
+  discountValue  Float    @map("discount_value")
+  deadline       String
+  isActive       Boolean  @default(true) @map("is_active")
+  redeemedAt     String?  @map("redeemed_at")
+  createdAt      String   @default(dbgenerated("to_char(CURRENT_TIMESTAMP, 'YYYY-MM-DD HH24:MI:SS')")) @map("created_at")
+
+  @@map("coupons")
+}
+
+model VaultProduct {
+  productId  Int      @id @map("product_id")
+  sortOrder  Int      @default(0) @map("sort_order")
+  createdAt  String   @default(dbgenerated("to_char(CURRENT_TIMESTAMP, 'YYYY-MM-DD HH24:MI:SS')")) @map("created_at")
+
+  product    Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@map("vault_products")
+}
+
+model CollectionTile {
+  id          Int           @id @default(autoincrement())
+  tileKey     String        @unique @map("tile_key")
+  label       String
+  subtitle    String?
+  imageUrl    String?       @map("image_url")
+  linkPath    String?       @map("link_path")
+  updatedAt   String        @default(dbgenerated("to_char(CURRENT_TIMESTAMP, 'YYYY-MM-DD HH24:MI:SS')")) @map("updated_at")
+
+
+  @@map("collection_tiles")
+}
+
+model TileProduct {
+  id          Int      @id @default(autoincrement())
+  tileKey     String   @map("tile_key")
+  productId   Int      @map("product_id")
+  sortOrder   Int      @default(0) @map("sort_order")
+
+  product     Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@unique([tileKey, productId])
+  @@map("tile_products")
+}
+
+model PaaraIrl {
+  id             Int      @id @default(autoincrement())
+  imageUrl       String   @map("image_url")
+  ownerImageUrl  String?  @map("owner_image_url")
+  caption        String?
+  sortOrder      Int      @default(0) @map("sort_order")
+  isActive       Boolean  @default(true) @map("is_active")
+  createdAt      String   @default(dbgenerated("to_char(CURRENT_TIMESTAMP, 'YYYY-MM-DD HH24:MI:SS')")) @map("created_at")
+  updatedAt      String   @default(dbgenerated("to_char(CURRENT_TIMESTAMP, 'YYYY-MM-DD HH24:MI:SS')")) @map("updated_at")
+
+  @@map("paara_irl")
+}

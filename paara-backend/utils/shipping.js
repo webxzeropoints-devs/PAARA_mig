@@ -1,5 +1,5 @@
-const { round2 } = require('./pricing');
-const db = require('../db/database');
+﻿const { round2 } = require('./pricing');
+const db = require('../db/database.pg');
 
 const RATES = {
   chennai: { online: 70, cod: 90 },
@@ -12,7 +12,7 @@ const RATES = {
 function normalizePaymentMethod(paymentMethod) {
   const raw = String(paymentMethod || '').trim().toLowerCase();
   if (raw === 'cod') return 'cod';
-  if (raw === 'razorpay' || raw === 'manual_upi' || raw === 'online') return 'online';
+  if (raw === 'payu' || raw === 'online') return 'online';
   return 'online';
 }
 
@@ -51,7 +51,7 @@ function rateForRegion(region, paymentMethod) {
   return normalizePaymentMethod(paymentMethod) === 'cod' ? rates.cod : rates.online;
 }
 
-function calculateShipping({ city, state, paymentMethod = 'razorpay', totalWeightKg }) {
+function calculateShipping({ city, state, paymentMethod = 'payu', totalWeightKg }) {
   const normalizedCity = String(city || '').trim();
   const stateName = String(state || '').trim();
   const amount = getDeliveryRate(normalizedCity, stateName, paymentMethod);

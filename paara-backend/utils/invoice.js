@@ -52,7 +52,7 @@ function createInvoicePdf(order, items, address) {
     doc.text(pdfText(`Date: ${invoiceDate}`));
     doc.text(pdfText(`Status: ${(order.payment_status === 'paid' ? 'PAID' : order.status || 'PROCESSING').toUpperCase()}`));
     doc.text(pdfText(`Payment: ${paymentLabel}`));
-    if (order.razorpay_payment_id) doc.text(pdfText(`Payment ID: ${order.razorpay_payment_id}`));
+    if (order.payment_reference) doc.text(pdfText(`Payment Reference: ${order.payment_reference}`));
     if (order.customer_name || order.name) doc.text(pdfText(`Customer: ${order.customer_name || order.name}`));
     doc.moveDown(1.2);
     if (address) {

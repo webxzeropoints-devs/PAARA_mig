@@ -8,7 +8,7 @@ import { useCart } from "../../lib/cart.jsx";
 
 const formatPrice = (n) => `₹${(n || 0).toLocaleString("en-IN")}`;
 const CONFIRMED_PAYMENT_STATUSES = new Set(["paid", "verified", "auto-confirmed - unverified"]);
-const paymentLabels = { manual_upi: "UPI Manual", cod: "COD", razorpay: "Online payment" };
+const paymentLabels = { payu: "PayU" };
 
 export default function OrderConfirmation() {
   const [params] = useSearchParams();
@@ -188,15 +188,10 @@ export default function OrderConfirmation() {
                     <span className="text-cocoa/70">Payment method</span>
                     <span className="font-medium">{paymentLabels[String(order.payment_method || "").toLowerCase()] || order.payment_method || "Payment"}</span>
                   </div>
-                  {String(order.payment_method || "").toLowerCase() === "manual_upi" && (
+                  {String(order.payment_method || "").toLowerCase() === "payu" && (
                     <p className="mt-3 text-xs leading-relaxed text-cocoa/70">
-                      {order.payment_reference
-                        ? <>Your payment reference <span className="select-all font-medium text-cocoa">{order.payment_reference}</span> has been received. We&apos;ll verify and confirm your order within a few hours.</>
-                        : "Your UPI payment has been received. We&apos;ll verify and confirm your order within a few hours."}
+                      PayU payment status: {String(order.payment_status || "unpaid").replace(/_/g, " ")}.
                     </p>
-                  )}
-                  {String(order.payment_method || "").toLowerCase() === "cod" && (
-                    <p className="mt-3 text-xs leading-relaxed text-cocoa/70">Pay {formatPrice(order.total_amount)} to the delivery person on arrival.</p>
                   )}
                   {(order.estimated_delivery || order.delivery_estimate || order.estimated_delivery_date) && (
                     <p className="mt-3 text-xs text-cocoa/70">Estimated delivery: {order.estimated_delivery || order.delivery_estimate || new Date(order.estimated_delivery_date).toLocaleDateString("en-IN")}</p>
