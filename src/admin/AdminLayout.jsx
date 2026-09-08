@@ -13,6 +13,7 @@ const NAV = [
   { to: "/admin/dashboard", label: "Dashboard" },
   { to: "/admin/collection-tiles", label: "Collection Tiles" },
   { to: "/admin/paara-irl", label: "Paara IRL" },
+  { to: "/admin/paara-story", label: "PAARA Story" },
   { to: "/admin/worn-by-you", label: "Worn by You" },
   { to: "/admin/coupons-loyalty", label: "Coupons & Loyalty" },
   { to: "/admin/orders", label: "Orders" },

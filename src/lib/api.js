@@ -259,6 +259,7 @@ export const getOrderById = (id) => apiGet(`/orders/${id}`);
 export const getOrderStatus = (orderId, email) => apiGet(`/orders/${orderId}/status?email=${encodeURIComponent(email)}`);
 export const getLoyaltyStatus = () => apiGet("/loyalty");
 export const getLoyaltyOrder = (orderId) => apiGet(`/loyalty/order/${orderId}`);
+export const getPaaraStory = () => apiGet("/paara-story");
 export const processLoyaltyOrder = (orderId) => apiPost("/loyalty/process-order", { order_id: orderId });
 export const redeemLoyaltyReward = () => apiPost("/loyalty/redeem-reward", {});
 export const markLoyaltyAnimationShown = (orderId) => apiPost("/loyalty/mark-animation-shown", { order_id: orderId });
@@ -283,11 +284,15 @@ export const downloadInvoice = async (orderId) => {
   URL.revokeObjectURL(url);
 };
 
+export const adminGetStory = () => adminRequest("/admin/paara-story");
+export const adminUpdateStory = (payload) => adminRequest("/admin/paara-story", { method: "PUT", body: payload });
+
 export default {
   apiGet,
   apiPost,
   apiPut,
   apiDelete,
+  getPaaraStory,
   adminRequest,
   adminListProducts,
   adminListCategories,
@@ -306,6 +311,8 @@ export default {
   adminChangeProfilePicture,
   adminChangeEmail,
   adminChangePassword,
+  adminGetStory,
+  adminUpdateStory,
   getToken,
   setToken,
   clearToken,

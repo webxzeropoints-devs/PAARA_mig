@@ -394,3 +394,13 @@ model PaaraIrl {
 
   @@map("paara_irl")
 }
+
+model PaaraStory {
+  id          Int      @id @default(1)
+  title       String   @default("A dream shaped by fashion. A brand built with purpose.") @map("title")
+  description String   @map("description")
+  createdAt   String   @default(dbgenerated("to_char(CURRENT_TIMESTAMP, 'YYYY-MM-DD HH24:MI:SS')")) @map("created_at")
+  updatedAt   String   @default(dbgenerated("to_char(CURRENT_TIMESTAMP, 'YYYY-MM-DD HH24:MI:SS')")) @map("updated_at")
+
+  @@map("paara_story")
+}

@@ -1155,6 +1155,78 @@ router.put('/paara-irl', async (q, s) => {
       });
   }
 });
+
+router.get('/paara-story', async (q, s) => {
+  try {
+    const result = await db.query(
+      'SELECT * FROM paara_story WHERE id = 1'
+    );
+
+    const row = result.rows[0];
+
+    return s.json(row || {
+      id: 1,
+      title: 'A dream shaped by fashion. A brand built with purpose.',
+      description: '',
+    });
+  } catch (error) {
+    console.error('[ADMIN_PAARA_STORY_GET_FAILED]', error.message);
+    return s.status(500).json({
+      error: 'Could not load Paara Story.',
+    });
+  }
+});
+
+router.put('/paara-story', async (q, s) => {
+  try {
+    const { title, description } = q.body || {};
+
+    if (!title || !description) {
+      return s.status(400).json({
+        error: 'Title and description are required.',
+      });
+    }
+
+    await db.query(`
+      INSERT INTO paara_story (
+        id,
+        title,
+        description,
+        created_at,
+        updated_at
+      )
+      VALUES (
+        1,
+        $1,
+        $2,
+        to_char(CURRENT_TIMESTAMP, 'YYYY-MM-DD HH24:MI:SS'),
+        to_char(CURRENT_TIMESTAMP, 'YYYY-MM-DD HH24:MI:SS')
+      )
+      ON CONFLICT (id) DO UPDATE SET
+        title = EXCLUDED.title,
+        description = EXCLUDED.description,
+        updated_at = to_char(
+          CURRENT_TIMESTAMP,
+          'YYYY-MM-DD HH24:MI:SS'
+        )
+    `, [
+      title || '',
+      description || '',
+    ]);
+
+    const result = await db.query(
+      'SELECT * FROM paara_story WHERE id = 1'
+    );
+
+    return s.json(result.rows[0]);
+  } catch (error) {
+    console.error('[ADMIN_PAARA_STORY_PUT_FAILED]', error.message);
+    return s.status(500).json({
+      error: 'Could not save Paara Story.',
+    });
+  }
+});
+
 router.get('/worn-by-you', async (q, s) => {
   try {
     const result = await db.query(`
@@ -1867,7 +1939,7 @@ router.post('/orders/:id/verify-manual-payment', async (q, s) => {
 
       await trySendEmail({
         to: order.email,
-        subject: `Order confirmed — ${order.order_number || `Order ${order.id}`}`,
+        subject: `Order confirmed ï¿½ ${order.order_number || `Order ${order.id}`}`,
         text: `Hi ${order.name || 'Customer'},
 
 Your payment has been verified and your Paara Jewellery order is confirmed.

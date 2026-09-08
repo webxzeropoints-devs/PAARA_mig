@@ -48,6 +48,7 @@ import AdminForgotPassword from "./admin/AdminForgotPassword";
 import AdminDashboard from "./admin/AdminDashboard";
 import AdminCollectionTiles from "./admin/AdminCollectionTiles";
 import AdminPaaraIRL from "./admin/AdminPaaraIRL";
+import AdminStory from "./admin/AdminStory";
 import AdminWornByYou from "./admin/AdminWornByYou";
 import AdminPromotions from "./admin/AdminPromotions";
 import AdminOrders from "./admin/AdminOrders";
@@ -110,6 +111,7 @@ function AnimatedRoutes() {
         <Route path="dashboard" element={<AdminDashboard />} />
         <Route path="collection-tiles" element={<AdminCollectionTiles />} />
         <Route path="paara-irl" element={<AdminPaaraIRL />} />
+        <Route path="paara-story" element={<AdminStory />} />
         <Route path="worn-by-you" element={<AdminWornByYou />} />
         <Route path="coupons-loyalty" element={<AdminPromotions />} />
         <Route path="coupons" element={<Navigate to="/admin/coupons-loyalty" replace />} />
