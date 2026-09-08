@@ -31,6 +31,7 @@ const adminAuthRouter = require('./routes/adminAuth');
 const couponsRouter = require('./routes/coupons');
 const homepageRouter = require('./routes/homepage');
 const loyaltyRouter = require('./routes/loyalty');
+const paaraStoryRouter = require('./routes/paaraStory');
 
 const app = express();
 
@@ -252,6 +253,7 @@ app.use('/api/shipping', shippingRouter);
 app.use('/api/orders', ordersRouter);
 app.use('/api/payment', paymentRouter);
 app.use('/api/loyalty', loyaltyRouter);
+app.use('/api/paara-story', paaraStoryRouter);
 
 // TEMPORARY PATCH â€” remove when migrated to Postgres
 app.get('/api/db-status', requireAdminSession, (req, res) => {
