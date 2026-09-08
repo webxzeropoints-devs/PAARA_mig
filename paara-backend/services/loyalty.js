@@ -4,12 +4,6 @@ const THRESHOLD = 599;
 const CARD_SIZE = 6;
 const VALIDITY_MONTHS = 6;
 
-const QUALIFYING_PAYMENT_STATUSES = new Set([
-  'paid',
-  'verified',
-  'auto-confirmed - unverified',
-]);
-
 const addMonths = (date, months) => {
   const result = new Date(date);
   result.setMonth(result.getMonth() + months);
@@ -27,6 +21,7 @@ const serializeCard = (card) => ({
   threshold: THRESHOLD,
   cardSize: CARD_SIZE,
   history: card?.history || [],
+  rewardHistory: card?.reward_history || [],
 });
 
 async function ensureLoyaltyCard(client, customerId) {
@@ -68,10 +63,63 @@ async function getLoyaltyState(customerId, client = db) {
     ORDER BY ls.awarded_at DESC
   `, [customerId]);
 
+  const rewardHistoryResult = await client.query(`
+    SELECT id, redeemed_at
+    FROM loyalty_reward_redemptions
+    WHERE customer_id = $1
+    ORDER BY redeemed_at DESC
+  `, [customerId]);
+
   return serializeCard({
     ...card,
     history: historyResult.rows,
+    reward_history: rewardHistoryResult.rows,
   });
+}
+
+async function redeemLoyaltyReward(customerId) {
+  const client = await db.pool.connect();
+
+  try {
+    await client.query('BEGIN');
+
+    const cardResult = await client.query(
+      'SELECT * FROM loyalty_cards WHERE customer_id = $1 FOR UPDATE',
+      [customerId]
+    );
+    const card = cardResult.rows[0];
+
+    if (!card || !card.completed_at || card.reward_redeemed_at) {
+      throw Object.assign(new Error('A completed loyalty reward is required.'), { statusCode: 409 });
+    }
+
+    const redeemedAt = new Date().toISOString();
+    await client.query(
+      'INSERT INTO loyalty_reward_redemptions (customer_id, redeemed_at) VALUES ($1, $2)',
+      [customerId, redeemedAt]
+    );
+    await client.query(`
+      UPDATE loyalty_cards
+      SET stamp_count = 0,
+          first_stamp_at = NULL,
+          expires_at = NULL,
+          completed_at = NULL,
+          reward_redeemed_at = $1,
+          updated_at = to_char(CURRENT_TIMESTAMP, 'YYYY-MM-DD HH24:MI:SS')
+      WHERE customer_id = $2
+    `, [redeemedAt, customerId]);
+
+    const state = await getLoyaltyState(customerId, client);
+    await client.query('COMMIT');
+    return { state, redeemedAt };
+  } catch (error) {
+    try {
+      await client.query('ROLLBACK');
+    } catch {}
+    throw error;
+  } finally {
+    client.release();
+  }
 }
 
 async function processLoyaltyOrder(orderId, customerId) {
@@ -119,8 +167,8 @@ async function processLoyaltyOrder(orderId, customerId) {
     const paymentMethod = String(order.payment_method || '').trim().toLowerCase();
 
     const qualifies =
-      paymentMethod !== 'cod' &&
-      QUALIFYING_PAYMENT_STATUSES.has(paymentStatus) &&
+      paymentMethod === 'payu' &&
+      paymentStatus === 'paid' &&
       Number(order.subtotal) >= THRESHOLD;
 
     if (!qualifies) {
@@ -201,6 +249,7 @@ async function processLoyaltyOrder(orderId, customerId) {
           first_stamp_at = $2,
           expires_at = $3,
           completed_at = $4,
+          reward_redeemed_at = NULL,
           updated_at = to_char(CURRENT_TIMESTAMP, 'YYYY-MM-DD HH24:MI:SS')
       WHERE customer_id = $5
     `, [
@@ -244,4 +293,5 @@ module.exports = {
   CARD_SIZE,
   getLoyaltyState,
   processLoyaltyOrder,
+  redeemLoyaltyReward,
 };

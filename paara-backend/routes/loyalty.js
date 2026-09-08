@@ -3,6 +3,7 @@ const { requireAuth } = require('../middleware/auth');
 const {
   getLoyaltyState,
   processLoyaltyOrder,
+  redeemLoyaltyReward,
 } = require('../services/loyalty');
 const db = require('../db/database.pg');
 
@@ -70,6 +71,22 @@ router.post('/process-order', requireAuth, async (req, res) => {
   if (!Number.isInteger(orderId) || orderId < 1) {
     return res.status(400).json({
       error: 'A valid order ID is required.',
+    });
+
+    router.post('/redeem-reward', requireAuth, async (req, res) => {
+      try {
+        const result = await redeemLoyaltyReward(req.customer.id);
+        return res.status(200).json({ success: true, ...result });
+      } catch (error) {
+        if (error.statusCode) {
+          return res.status(error.statusCode).json({ error: error.message });
+        }
+        console.error('[LOYALTY_REDEEM_FAILED]', {
+          message: error.message,
+          name: error.name,
+        });
+        return res.status(500).json({ error: 'Could not redeem this loyalty reward.' });
+      }
     });
   }
 

@@ -100,6 +100,7 @@ model Customer {
   orders               Order[]
   loyaltyCard          LoyaltyCard?
   loyaltyStamps        LoyaltyStamp[]
+  loyaltyRewardRedemptions LoyaltyRewardRedemption[]
   wishlists            Wishlist[]
 
   @@map("customers")
@@ -265,6 +266,17 @@ model LoyaltyStamp {
 
   @@index([customerId, awardedAt], map: "idx_loyalty_stamps_customer")
   @@map("loyalty_stamps")
+}
+
+model LoyaltyRewardRedemption {
+  id         Int      @id @default(autoincrement())
+  customerId Int      @map("customer_id")
+  redeemedAt String   @map("redeemed_at")
+
+  customer Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  @@index([customerId, redeemedAt], map: "idx_loyalty_rewards_customer")
+  @@map("loyalty_reward_redemptions")
 }
 
 model GiftCardRule {
