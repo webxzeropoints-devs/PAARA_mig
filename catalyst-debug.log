@@ -32,3 +32,10 @@ Query params: {"feature_name":"runtime"}
 [debug] [2026-09-09T17:51:15.476Z] : <<<< HTTP RESPONSE : 200
 Response Headers: {"server":"ZGS","date":"Wed, 09 Sep 2026 17:51:15 GMT","content-type":"application/vnd.catalyst.v2+json","transfer-encoding":"chunked","connection":"keep-alive","x-content-type-options":"nosniff","cache-control":"private,no-cache,no-store,max-age=0,must-revalidate","pragma":"no-cache","expires":"Thu, 01 Jan 1970 00:00:00 GMT","x-frame-options":"DENY","strict-transport-security":"max-age=64072000; includeSubDomains; preload"}
 
+[debug] [2026-09-09T17:52:21.361Z] : >>>> HTTP REQUEST : GET https://api.catalyst.zoho.in/baas/v1/project/64283000000013127/appsail 
+
+[debug] [2026-09-09T17:52:21.534Z] : <<<< HTTP RESPONSE : 200
+Response Headers: {"server":"ZGS","date":"Wed, 09 Sep 2026 17:52:21 GMT","content-type":"application/vnd.catalyst.v2+json","transfer-encoding":"chunked","connection":"keep-alive","x-content-type-options":"nosniff","cache-control":"private,no-cache,no-store,max-age=0,must-revalidate","pragma":"no-cache","expires":"Thu, 01 Jan 1970 00:00:00 GMT","x-frame-options":"DENY","strict-transport-security":"max-age=64072000; includeSubDomains; preload"}
+
+[debug] [2026-09-09T17:52:21.543Z] : >>>> HTTP REQUEST : PUT https://api.catalyst.zoho.in/baas/v1/project/64283000000013127/appsail/upsert 
+
