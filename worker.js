@@ -5,12 +5,12 @@ export default {
     const url = new URL(request.url);
 
     // Dynamic backend resources must not fall through to the Vite SPA asset
-    // handler. Product/homepage uploads are stored and served by AppSail under
-    // /uploads, while private legacy Blob images are exposed through
-    // /images/blob by the backend.
+    // handler. Durable media and legacy compatibility paths are served by the
+    // backend and must return binary data, not index.html.
     if (
       url.pathname === "/api" ||
       url.pathname.startsWith("/api/") ||
+      url.pathname.startsWith("/media/") ||
       url.pathname.startsWith("/uploads/") ||
       url.pathname === "/images/blob" ||
       url.pathname.startsWith("/images/blob/")

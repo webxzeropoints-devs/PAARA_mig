@@ -51,7 +51,6 @@ router.post('/', requireAuth, async (req, res) => {
     await db.query(`
       INSERT INTO wishlist (customer_id, product_id)
       VALUES ($1, $2)
-      ON CONFLICT DO NOTHING
     `, [req.customer.id, product_id]);
 
     return res.status(201).json({

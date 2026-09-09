@@ -2,9 +2,8 @@ const express = require('express');
 const db = require('../db/database.pg');
 const { requireAdmin } = require('../middleware/admin');
 const { processLoyaltyOrder } = require('../services/loyalty');
-const path = require('path');
-const fs = require('fs');
 const publicImageUrl = require('../utils/publicImageUrl');
+const mediaStore = require('../utils/mediaStore');
 const { getEmailConfigurationStatus } = require('../utils/email');
 
 const router = express.Router();
@@ -26,12 +25,28 @@ const normalizeFormBoolean = (value, fallback = false) => {
   return Boolean(value);
 };
 
-// Local dev keeps writing to disk (public/uploads); on Vercel the filesystem
-// isn't writable/persistent, so uploads go to Vercel Blob storage instead.
-const uploadsDir = path.join(__dirname, '../public/uploads/products');
-if (!db.isServerless && !fs.existsSync(uploadsDir)) {
-  fs.mkdirSync(uploadsDir, { recursive: true });
-}
+const cleanImages = (images) => (Array.isArray(images)
+  ? images.map((image) => String(image || '').trim()).filter(Boolean)
+  : []);
+
+const safeUploadError = (error) => ({
+  message: error?.message || 'Image storage failed.',
+  code: error?.code || 'MEDIA_STORAGE_FAILED',
+});
+
+const deleteIfUnreferenced = async (references) => {
+  for (const reference of new Set(references.filter(mediaStore.isCatalystReference))) {
+    const result = await db.query(`
+      SELECT 1 FROM product_images WHERE image_url = $1
+      UNION ALL SELECT 1 FROM instagram_reviews WHERE image_url = $1
+      UNION ALL SELECT 1 FROM paara_irl WHERE image_url = $1 OR owner_image_url = $1
+      UNION ALL SELECT 1 FROM collection_tiles WHERE image_url = $1
+      UNION ALL SELECT 1 FROM admins WHERE profile_image_url = $1
+      LIMIT 1
+    `, [reference]);
+    if (result.rowCount === 0) await mediaStore.deleteReference(reference);
+  }
+};
 
 const decorate = async (rows) => {
   if (!rows.length) return [];
@@ -52,7 +67,7 @@ const decorate = async (rows) => {
     if (!imagesByProduct.has(row.product_id)) {
       imagesByProduct.set(row.product_id, []);
     }
-    imagesByProduct.get(row.product_id).push(row.image_url);
+    imagesByProduct.get(row.product_id).push(publicImageUrl(row.image_url));
   }
 
   return rows.map((product) => ({
@@ -91,81 +106,29 @@ const orderedImageUrls = ({ uploadedImages, existingImages, uploadSlots, existin
     const slot = Number.isInteger(uploadSlots[index]) ? uploadSlots[index] : index;
     slots.set(slot, url);
   });
-  existingImages.forEach((url, index) => {
+  existingImages.map(mediaStore.toStorageReference).forEach((url, index) => {
     const slot = Number.isInteger(existingSlots[index]) ? existingSlots[index] : uploadedImages.length + index;
     slots.set(slot, url);
   });
   return [...slots.entries()].sort(([left], [right]) => left - right).map(([, url]) => url);
 };
 
-// Helper function to save uploaded files — Vercel Blob when serverless
-// (persistent, public URL), local disk otherwise (unchanged dev behaviour).
 const saveUploadedImages = async (files) => {
   if (!files || files.length === 0) return [];
-
-  files.forEach((file) => {
-    if (!file?.buffer?.length || !file.mimetype?.startsWith('image/')) {
-      throw Object.assign(new Error('The uploaded image data was empty or was not an image.'), { code: 'INVALID_IMAGE_UPLOAD' });
-    }
-  });
-
-  if (db.isServerless) {
-    const { put } = require('@vercel/blob');
-    return Promise.all(files.map(async (file) => {
-      const timestamp = Date.now();
-      const random = Math.random().toString(36).substring(2, 8);
-      const filename = `product-${timestamp}-${random}${path.extname(file.originalname)}`;
-      const blob = await put(`products/${filename}`, file.buffer, {
-        ...imageBlobOptions(),
-        addRandomSuffix: false,
-        contentType: file.mimetype,
-      });
-      if (!blob?.url || !/^https?:\/\//i.test(blob.url)) {
-        throw Object.assign(new Error('Persistent image storage returned no public URL.'), { code: 'BLOB_URL_MISSING' });
-      }
-      return blob.url;
-    }));
+  const uploaded = [];
+  try {
+    for (const file of files) uploaded.push(await mediaStore.uploadImage(file, 'product'));
+    return uploaded.map((item) => item.reference);
+  } catch (error) {
+    await Promise.allSettled(uploaded.map((item) => mediaStore.deleteReference(item.reference)));
+    throw error;
   }
-
-  return files.map((file) => {
-    const timestamp = Date.now();
-    const random = Math.random().toString(36).substring(2, 8);
-    const filename = `product-${timestamp}-${random}${path.extname(file.originalname)}`;
-    const filepath = path.join(uploadsDir, filename);
-
-    fs.writeFileSync(filepath, file.buffer);
-    return `/uploads/products/${filename}`;
-  });
 };
 
 const saveUploadedImage = async (file, prefix) => {
   if (!file) return null;
-  if (!file.buffer?.length || !file.mimetype?.startsWith('image/')) {
-    throw Object.assign(new Error('The uploaded image data was empty or was not an image.'), { code: 'INVALID_IMAGE_UPLOAD' });
-  }
-  if (db.isServerless) {
-    const { put } = require('@vercel/blob');
-    const timestamp = Date.now();
-    const random = Math.random().toString(36).substring(2, 8);
-    const filename = `${prefix}-${timestamp}-${random}${path.extname(file.originalname)}`;
-    const blob = await put(`homepage/${filename}`, file.buffer, {
-      ...imageBlobOptions(),
-      addRandomSuffix: false,
-      contentType: file.mimetype,
-    });
-    if (!blob?.url || !/^https?:\/\//i.test(blob.url)) {
-      throw Object.assign(new Error('Persistent image storage returned no public URL.'), { code: 'BLOB_URL_MISSING' });
-    }
-    return blob.url;
-  }
-
-  const timestamp = Date.now();
-  const random = Math.random().toString(36).substring(2, 8);
-  const filename = `${prefix}-${timestamp}-${random}${path.extname(file.originalname)}`;
-  const homepageUploadsDir = path.join(__dirname, '../public/uploads/homepage');
-  if (!fs.existsSync(homepageUploadsDir)) fs.mkdirSync(homepageUploadsDir, { recursive: true });
-  fs.writeFileSync(path.join(homepageUploadsDir, filename), file.buffer);
-  return `/uploads/homepage/${filename}`;
+  const uploaded = await mediaStore.uploadImage(file, prefix);
+  return uploaded.reference;
 };
 
 router.get('/products', async (q, s) => {
@@ -702,6 +665,10 @@ router.put('/products/:id', async (q, s) => {
       return s.status(404).json({ error: 'Product not found.' });
     }
 
+    const previousImages = await db.query(
+      'SELECT image_url FROM product_images WHERE product_id = $1',
+      [q.params.id]
+    );
     const uploadedImages = await saveUploadedImages(asFiles(q.files));
 
     const hasExistingImages = Object.prototype.hasOwnProperty.call(
@@ -728,6 +695,8 @@ router.put('/products/:id', async (q, s) => {
 
     if (uploadedImages.length > 0 || hasExistingImages) {
       await writeImages(q.params.id, allImages);
+      await deleteIfUnreferenced(previousImages.rows.map((row) => row.image_url)
+        .filter((image) => !allImages.includes(image)));
     }
 
     delete updates.existingImages;
@@ -888,6 +857,10 @@ router.delete('/products/:id', async (q, s) => {
       });
     }
 
+    const images = await db.query(
+      'SELECT image_url FROM product_images WHERE product_id = $1',
+      [q.params.id]
+    );
     const result = await db.query(
       'DELETE FROM products WHERE id = $1 RETURNING id',
       [q.params.id]
@@ -899,6 +872,7 @@ router.delete('/products/:id', async (q, s) => {
       });
     }
 
+    await deleteIfUnreferenced(images.rows.map((row) => row.image_url));
     return s.json({ success: true });
   } catch (error) {
     console.error('[ADMIN_PRODUCT_DELETE_FAILED]', error.message);
@@ -1043,6 +1017,10 @@ router.put('/paara-irl', async (q, s) => {
       : [q.body?.upload_slots].filter(Boolean);
 
     const files = asFiles(q.files);
+    const previousResult = await db.query(
+      'SELECT image_url, owner_image_url FROM paara_irl WHERE id = 1'
+    );
+    const previousImages = previousResult.rows[0] || {};
 
     const uploadedImages = await Promise.all(
       files.map((file, index) =>
@@ -1063,10 +1041,10 @@ router.put('/paara-irl', async (q, s) => {
     );
 
     const nextImageUrl =
-      uploadedBySlot.image || publicImageUrl(image_url);
+      uploadedBySlot.image || mediaStore.toStorageReference(image_url);
 
     const nextOwnerImageUrl =
-      uploadedBySlot.owner || publicImageUrl(owner_image_url);
+      uploadedBySlot.owner || mediaStore.toStorageReference(owner_image_url);
 
     if (
       String(image_url || '').startsWith('data:') &&
@@ -1132,6 +1110,10 @@ router.put('/paara-irl', async (q, s) => {
     );
 
     const row = result.rows[0];
+    await deleteIfUnreferenced([
+      previousImages.image_url,
+      previousImages.owner_image_url,
+    ].filter((image) => image && ![nextImageUrl, nextOwnerImageUrl].includes(image)));
 
     return s.json({
       ...row,
@@ -1284,6 +1266,15 @@ router.put('/worn-by-you', async (q, s) => {
       : [q.body?.upload_slots].filter(Boolean);
 
     const files = asFiles(q.files);
+    const previousResult = await db.query(`
+      SELECT id, image_url
+      FROM instagram_reviews
+      WHERE product_id IS NULL
+        AND sort_order BETWEEN 0 AND 2
+    `);
+    const previousImages = new Map(
+      previousResult.rows.map((row) => [Number(row.id), row.image_url])
+    );
 
     const uploadedImages = await Promise.all(
       files.map((file) => saveUploadedImage(file, 'worn-by-you'))
@@ -1308,7 +1299,7 @@ router.put('/worn-by-you', async (q, s) => {
 
         const imageUrl =
           uploadedBySlot[String(slotIndex)] ||
-          publicImageUrl(slot.image_url) ||
+          mediaStore.toStorageReference(slot.image_url) ||
           '';
 
         const caption = slot.caption || null;
@@ -1382,10 +1373,18 @@ router.put('/worn-by-you', async (q, s) => {
       }
 
       await client.query('COMMIT');
+      await deleteIfUnreferenced(
+        [...previousImages.entries()]
+          .filter(([id, image]) => image && !saved.some((row) => Number(row.id) === id && row.image_url === image))
+          .map(([, image]) => image)
+      );
 
       return s.json({
         success: true,
-        slots: saved,
+        slots: saved.map((row) => ({
+          ...row,
+          image_url: publicImageUrl(row.image_url),
+        })),
       });
     } catch (error) {
       try {
@@ -1409,6 +1408,10 @@ router.put('/worn-by-you', async (q, s) => {
 });
 router.delete('/worn-by-you/:id', async (q, s) => {
   try {
+    const existing = await db.query(
+      'SELECT image_url FROM instagram_reviews WHERE id = $1 AND product_id IS NULL',
+      [q.params.id]
+    );
     const result = await db.query(`
       UPDATE instagram_reviews
       SET image_url = '',
@@ -1431,6 +1434,7 @@ router.delete('/worn-by-you/:id', async (q, s) => {
       });
     }
 
+    await deleteIfUnreferenced(existing.rows.map((row) => row.image_url));
     return s.json({
       success: true,
       id: Number(q.params.id),
@@ -2145,12 +2149,6 @@ router.post('/orders/:id/grant-gift-card', async (q, s) => {
 });
 module.exports = router;
 module.exports.normalizeFormBoolean = normalizeFormBoolean;
-
-
-
-
-
-
 
 
 

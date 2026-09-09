@@ -15,6 +15,7 @@ const db = require('./db/database.pg');
 const { requireAdminSession } = require('./middleware/adminAuth');
 const { maskSensitiveText } = require('./utils/validate');
 const { formatOrderNumber } = require('./utils/orderNumber');
+const mediaStore = require('./utils/mediaStore');
 
 const productsRouter = require('./routes/products');
 const vaultRouter = require('./routes/vault');
@@ -112,6 +113,20 @@ app.use((req, res, next) => {
 
 // Serve the shared public assets used by the storefront and local upload files.
 app.use('/images', express.static(path.join(__dirname, '..', 'public', 'images')));
+app.get('/media/:fileId', async (req, res) => {
+  const fileId = String(req.params.fileId || '').trim();
+  if (!/^[A-Za-z0-9_-]+$/.test(fileId)) return res.status(404).end();
+  try {
+    const media = await mediaStore.download(`catalyst-file:${fileId}`);
+    if (!media) return res.status(404).end();
+    res.set('Content-Type', media.contentType);
+    res.set('Content-Length', String(media.buffer.length));
+    return res.end(media.buffer);
+  } catch (error) {
+    console.error('[MEDIA_DOWNLOAD_FAILED]', { fileId, message: error.message, code: error.code });
+    return res.status(error.code === 'MEDIA_STORAGE_NOT_CONFIGURED' ? 503 : 404).end();
+  }
+});
 app.get('/images/blob/*', async (req, res) => {
   try {
     const pathname = decodeURIComponent(req.params[0] || '');

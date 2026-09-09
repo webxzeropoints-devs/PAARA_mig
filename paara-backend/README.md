@@ -48,11 +48,13 @@ values:
 `GET /api/health` is the health check endpoint. The future Slate origin must be
 included in `FRONTEND_URL`; credentials and PayU callbacks must use HTTPS.
 
-AppSail local filesystem storage is not a durable shared upload store. Product
-and homepage uploads currently write to `public/uploads` in the non-serverless
-runtime, so persistent AppSail uploads require a follow-up migration to
-Catalyst Stratus or another approved object-storage backend before production
-use. PostgreSQL remains the source of truth for migrated application data.
+AppSail local filesystem storage is not used for uploads. Product, homepage,
+Paara IRL, owner, Worn By You, and other admin image uploads go to the
+Catalyst File Store folder identified by `CATALYST_MEDIA_FOLDER_ID`. PostgreSQL
+stores opaque `catalyst-file:<id>` references and the API exposes all new media
+through `/media/<id>`, so the frontend does not depend on storage internals.
+Legacy `/images/*` and `/uploads/*` references remain readable for migrated
+records; they are not rewritten or deleted automatically.
 
 ## What's included
 
