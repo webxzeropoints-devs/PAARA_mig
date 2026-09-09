@@ -5,12 +5,10 @@ import { Heart } from "lucide-react";
 
 import { prefersReducedMotion } from "../lib/motion";
 import { useWishlist } from "../lib/wishlist.jsx";
-import { resolveAssetUrl } from "../lib/api";
+import { getToken, resolveAssetUrl } from "../lib/api";
 
 // Product shape (from §3 GET /products):
 //   { id, slug, name, price, images: [url,...], is_exclusive, rating?, reviews_count? }
-
-const fallbackProductImage = "/images/products/☆★.jpg";
 
 const formatPrice = (n) =>
   typeof n === "number"
@@ -32,7 +30,7 @@ export default function ProductFlipCard({ product, index = 0, compact = false, b
     ? product.images.filter(Boolean)
     : product?.image
       ? [product.image]
-      : [fallbackProductImage];
+      : [];
 
   // Only one image is ever shown on the front face — no hover image swap.
   const resolvedImages = images.map(resolveAssetUrl);
@@ -40,7 +38,9 @@ export default function ProductFlipCard({ product, index = 0, compact = false, b
   const marqueeImgs =
     resolvedImages.length > 1
       ? resolvedImages
-      : [resolvedImages[0], resolvedImages[0], resolvedImages[0], resolvedImages[0]];
+      : resolvedImages.length === 1
+        ? [resolvedImages[0], resolvedImages[0], resolvedImages[0], resolvedImages[0]]
+        : [];
 
   // Marquee duration scales with image count, 6–10s linear per §7.
   const marqueeDuration = Math.min(
@@ -105,16 +105,22 @@ export default function ProductFlipCard({ product, index = 0, compact = false, b
             style={{ backfaceVisibility: "hidden" }}
             onClick={navigateOnClick ? onActivate : undefined}
           >
-            <img
-              src={frontImg}
-              alt={product?.name}
-              loading="lazy"
-              className={`w-full h-full object-cover transition-transform duration-500 group-hover:scale-105 ${navigateOnClick ? "cursor-pointer" : ""}`}
-              onClick={navigateOnClick ? (event) => {
-                event.stopPropagation();
-                onActivate();
-              } : undefined}
-            />
+            {frontImg ? (
+              <img
+                src={frontImg}
+                alt={product?.name}
+                loading="lazy"
+                className={`w-full h-full object-cover transition-transform duration-500 group-hover:scale-105 ${navigateOnClick ? "cursor-pointer" : ""}`}
+                onClick={navigateOnClick ? (event) => {
+                  event.stopPropagation();
+                  onActivate();
+                } : undefined}
+              />
+            ) : (
+              <div className="flex h-full items-center justify-center p-4 text-center text-sm text-red-700">
+                Image unavailable
+              </div>
+            )}
             {product?.is_exclusive && (
               <span className="absolute top-1.5 left-1.5 sm:top-3 sm:left-3 px-1.5 py-0.5 sm:px-3 sm:py-1 bg-espresso-ink/85 text-pearl font-script italic text-xs sm:text-sm rounded-sm tracking-wide">
                 Exclusive
@@ -129,7 +135,13 @@ export default function ProductFlipCard({ product, index = 0, compact = false, b
               type="button"
               onClick={(e) => {
                 e.stopPropagation();
-                if (productId != null) toggle(productId);
+                if (!getToken()) {
+                  navigate("/login");
+                  return;
+                }
+                if (productId != null) toggle(productId).catch((error) => {
+                  console.error("[paara] wishlist update failed", error);
+                });
               }}
               aria-label={saved ? "Remove from wishlist" : "Add to wishlist"}
               aria-pressed={saved}

@@ -1,12 +1,11 @@
-// Shared wishlist context — frontend-only state.
-// Wishlist is a list of product ids, persisted to localStorage, and mirrors
-// the CartProvider pattern already used in this project (see cart.jsx).
+// Shared wishlist context backed by the authenticated wishlist API.
 //
 // Any component can call useWishlist() to read the current ids and to
 // toggle/add/remove a product. State updates immediately (no page reload
 // needed) and persists across navigation + refresh.
 
 import React, { createContext, useContext, useEffect, useMemo, useState, useCallback } from "react";
+import { addWishlistItem, getToken, getWishlist, removeWishlistItem } from "./api";
 
 const WISHLIST_KEY = "paara_wishlist";
 const WISHLIST_EVENT = "paara-wishlist-change";
@@ -25,6 +24,30 @@ const WishlistContext = createContext(null);
 
 export function WishlistProvider({ children }) {
   const [ids, setIds] = useState(() => readWishlist());
+
+  const loadRemoteWishlist = useCallback(async () => {
+    if (!getToken()) {
+      setIds([]);
+      return;
+    }
+    const response = await getWishlist();
+    const remoteItems = Array.isArray(response) ? response : response?.items;
+    const remoteIds = Array.isArray(remoteItems)
+      ? remoteItems.map((item) => String(item.product_id ?? item.id))
+      : [];
+    setIds(remoteIds.filter((id) => id !== "undefined"));
+  }, []);
+
+  useEffect(() => {
+    const syncAuth = () => {
+      loadRemoteWishlist().catch((error) => {
+        console.error("[paara] unable to load wishlist", error);
+      });
+    };
+    syncAuth();
+    window.addEventListener("paara-auth-change", syncAuth);
+    return () => window.removeEventListener("paara-auth-change", syncAuth);
+  }, [loadRemoteWishlist]);
 
   // Keep localStorage in sync whenever ids change, and notify any listeners
   // (e.g. the standalone Wishlist page) that aren't using this context.
@@ -46,20 +69,34 @@ export function WishlistProvider({ children }) {
 
   const isSaved = useCallback((productId) => ids.includes(String(productId)), [ids]);
 
-  const add = useCallback((productId) => {
+  const add = useCallback(async (productId) => {
     const key = String(productId);
+    if (!getToken()) return false;
+    await addWishlistItem(productId);
     setIds((prev) => (prev.includes(key) ? prev : [...prev, key]));
+    return true;
   }, []);
 
-  const remove = useCallback((productId) => {
+  const remove = useCallback(async (productId) => {
     const key = String(productId);
+    if (!getToken()) return false;
+    await removeWishlistItem(productId);
     setIds((prev) => prev.filter((id) => id !== key));
+    return true;
   }, []);
 
-  const toggle = useCallback((productId) => {
+  const toggle = useCallback(async (productId) => {
     const key = String(productId);
-    setIds((prev) => (prev.includes(key) ? prev.filter((id) => id !== key) : [...prev, key]));
-  }, []);
+    if (!getToken()) return false;
+    if (ids.includes(key)) {
+      await removeWishlistItem(productId);
+      setIds((prev) => prev.filter((id) => id !== key));
+    } else {
+      await addWishlistItem(productId);
+      setIds((prev) => (prev.includes(key) ? prev : [...prev, key]));
+    }
+    return true;
+  }, [ids]);
 
   const value = useMemo(
     () => ({ ids, count: ids.length, isSaved, add, remove, toggle }),

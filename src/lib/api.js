@@ -178,6 +178,10 @@ export const apiDelete = wrapFetch((path) =>
   }).then((res) => handle(res))
 );
 
+export const getWishlist = () => apiGet("/wishlist");
+export const addWishlistItem = (productId) => apiPost("/wishlist", { product_id: productId });
+export const removeWishlistItem = (productId) => apiDelete(`/wishlist/${encodeURIComponent(productId)}`);
+
 export const adminRequest = wrapFetch((path, options = {}) => {
   const { method = "GET", body, headers: extraHeaders = {} } = options;
   const headers = buildHeaders(extraHeaders, true);

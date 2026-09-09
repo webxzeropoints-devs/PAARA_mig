@@ -1,7 +1,9 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import Seo from "../../components/Seo";
-import { getProducts } from "../../lib/api";
+import { useCart } from "../../lib/cart.jsx";
+import { useWishlist } from "../../lib/wishlist.jsx";
+import { getProducts, getToken } from "../../lib/api";
 
 const Product = () => {
   const navigate = useNavigate();
@@ -9,9 +11,10 @@ const Product = () => {
 
   const [search, setSearch] = useState("");
   const [sortBy, setSortBy] = useState("featured");
-  const [wishlist, setWishlist] = useState([]);
   const [cartMessage, setCartMessage] = useState("");
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const { addItem } = useCart();
+  const { isSaved, toggle: toggleSaved } = useWishlist();
 
   const navigateFromMobileMenu = (path) => {
     setIsMobileMenuOpen(false);
@@ -758,7 +761,7 @@ const Product = () => {
     };
   }, [collectionType]);
 
-  const products = catalogProducts || fallbackProducts;
+  const products = catalogProducts || [];
 
   /* ==========================================================
      CURRENT COLLECTION PRODUCTS
@@ -819,12 +822,12 @@ const Product = () => {
   const toggleWishlist = (id, event) => {
     event.stopPropagation();
 
-    setWishlist((previous) => {
-      if (previous.includes(id)) {
-        return previous.filter((item) => item !== id);
-      }
-
-      return [...previous, id];
+    if (!getToken()) {
+      navigate("/login");
+      return;
+    }
+    toggleSaved(id).catch((error) => {
+      console.error("[paara] wishlist update failed", error);
     });
   };
 
@@ -835,6 +838,8 @@ const Product = () => {
   const addToCart = (product, event) => {
     event.stopPropagation();
 
+    if (Number(product.stock) <= 0) return;
+    addItem(product.id, 1, product);
     setCartMessage(`${product.name} added to your bag`);
 
     setTimeout(() => {
@@ -847,7 +852,7 @@ const Product = () => {
   ========================================================== */
 
   const openProduct = (product) => {
-    navigate(`/product/${product.id}`, {
+    navigate(`/product/${product.slug}`, {
       state: {
         collectionType: product.category,
       },
@@ -1142,8 +1147,7 @@ const Product = () => {
         <main className="product-grid-section">
           <div className="product-grid">
             {filteredProducts.map((product) => {
-              const isWishlisted =
-                wishlist.includes(product.id);
+              const isWishlisted = isSaved(product.id);
 
               return (
                 <article
@@ -1225,20 +1229,20 @@ const Product = () => {
                       </span>
 
                       <span className="old-price font-numeric">
-                        ₹
-                        {product.oldPrice.toLocaleString(
-                          "en-IN"
-                        )}
+                        {product.oldPrice != null
+                          ? `₹${Number(product.oldPrice).toLocaleString("en-IN")}`
+                          : ""}
                       </span>
                     </div>
 
                     <button
                       className="add-cart-button"
+                      disabled={Number(product.stock) <= 0}
                       onClick={(event) =>
                         addToCart(product, event)
                       }
                     >
-                      ADD TO CART
+                      {Number(product.stock) <= 0 ? "OUT OF STOCK" : "ADD TO CART"}
                     </button>
                   </div>
                 </article>

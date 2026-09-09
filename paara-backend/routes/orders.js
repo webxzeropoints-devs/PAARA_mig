@@ -203,11 +203,18 @@ async function createOrder({ customerId, items, addressId, paymentMethod = 'payu
 
 router.post('/', requireAuth, async (req, res) => {
   try {
+    const requestedPaymentMethod = String(req.body?.payment_method || 'payu').trim().toLowerCase();
+    if (requestedPaymentMethod !== 'payu') {
+      return res.status(400).json({
+        error: 'PayU is the only available payment method.',
+      });
+    }
+
     const order = await createOrder({
       customerId: req.customer.id,
       items: req.body?.items,
       addressId: req.body?.address_id,
-      paymentMethod: 'payu'
+      paymentMethod: requestedPaymentMethod
     });
 
     await db.persistAfterWrite();

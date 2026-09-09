@@ -8,25 +8,6 @@ import { apiGet, getProducts, getVaultToday } from "../lib/api";
 import { fadeUp, heroParent, childFadeUp } from "../lib/motion";
 import Seo from "../components/Seo";
 
-const placeholderImg = (label, index = 0) =>
-  `data:image/svg+xml;utf8,${encodeURIComponent(
-    `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 800 800'><defs><linearGradient id='g' x1='0' x2='1' y1='0' y2='1'><stop stop-color='#f5efe3'/><stop offset='1' stop-color='#caa978'/></linearGradient></defs><rect width='800' height='800' fill='url(#g)'/><circle cx='400' cy='380' r='130' fill='none' stroke='#6B4A33' stroke-opacity='.28' stroke-width='24'/><text x='50%' y='72%' text-anchor='middle' font-family='Georgia, serif' font-size='30' letter-spacing='6' fill='#4A3626'>${label.toUpperCase()} ${index + 1}</text></svg>`
-  )}`;
-
-const productCardImages = [
-  "/images/products/☆★.jpg",
-  "/images/products/180284791331464120.jpg",
-  "/images/products/25332816647584589.jpg",
-];
-
-const exactProducts = (products, count, label) => [
-  ...products.slice(0, count),
-  ...Array.from({ length: Math.max(0, count - products.length) }, (_, index) => ({
-    id: `${label}-${index}`, slug: `${label}-${index}`, name: `${label} ${index + 1}`,
-    price: "", images: [productCardImages[index % productCardImages.length]],
-  })),
-];
-
 function useHomeZoomStack(containerRef) {
   useEffect(() => {
     const container = containerRef.current;
@@ -144,7 +125,7 @@ export default function Home() {
       <AnimatePresence>{showSplash && <SplashScreen />}</AnimatePresence>
       <Hero />
       <MeetOwner />
-      <Vault products={exactProducts(vault, 3, "Vault piece")} />
+      <Vault products={vault} />
       <CustomerLove />
       <Collections />
       <ProductGrid title="Our Bestsellers" products={bestsellers} loading={bestsellersLoading} />
@@ -392,10 +373,10 @@ function CollectionFlipCard({ collection }) {
   const [flipped, setFlipped] = useState(false);
   const [imageReady, setImageReady] = useState(false);
   const toggle = () => setFlipped((value) => !value);
-  const imageUrl = collection.image_url || collection.products?.[0]?.image_url || placeholderImg(collection.name);
-  const displayImageUrl = imageUrl.startsWith("data:") ? imageUrl : `${imageUrl}${imageUrl.includes("?") ? "&" : "?"}v=${collection.imageVersion || "current"}`;
+  const imageUrl = collection.image_url || collection.products?.[0]?.image_url || "";
+  const displayImageUrl = imageUrl ? `${imageUrl}${imageUrl.includes("?") ? "&" : "?"}v=${collection.imageVersion || "current"}` : "";
   const marqueeImages = Array.from(new Set([
-    displayImageUrl,
+    ...(displayImageUrl ? [displayImageUrl] : []),
     ...(collection.products || [])
       .map((product) => product.image_url)
       .filter(Boolean)
@@ -404,6 +385,7 @@ function CollectionFlipCard({ collection }) {
   const marqueeCopies = [...marqueeImages, ...marqueeImages];
   useEffect(() => {
     setImageReady(false);
+    if (!displayImageUrl) return undefined;
     const image = new Image();
     image.onload = () => setImageReady(true);
     image.onerror = () => setImageReady(false);
@@ -418,7 +400,8 @@ function CollectionFlipCard({ collection }) {
     <div role="button" tabIndex={0} onClick={toggle} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); toggle(); } }} aria-pressed={flipped} aria-label={`Explore ${collection.name} collection`} className="relative block w-full aspect-[4/5] text-left [transform-style:preserve-3d] transition-transform duration-700 ease-[cubic-bezier(.2,.75,.25,1)] focus:outline-none focus-visible:ring-2 focus-visible:ring-gold" style={{ transform: flipped ? "rotateY(180deg)" : "rotateY(0deg)" }}>
       <span className="absolute inset-0 overflow-hidden p-8 md:p-10 flex flex-col justify-between [backface-visibility:hidden]" style={{ background: `linear-gradient(145deg, ${collection.color}, #f0dfc3)`, backfaceVisibility: "hidden" }}><span className="text-[10px] uppercase tracking-[.28em] text-white/80">Paara. collection</span><span><span className="font-display text-5xl text-white block">{collection.name}</span><span className="mt-3 block text-xs uppercase tracking-[.2em] text-white/85">Flip to explore ↻</span></span><span className="text-white/70 text-3xl">✦</span></span>
       <span className="absolute inset-0 overflow-hidden bg-cocoa text-sand [backface-visibility:hidden] [transform:rotateY(180deg)]" style={{ backfaceVisibility: "hidden", transform: "rotateY(180deg)" }}>
-        <span className="collection-marquee collection-marquee-full absolute inset-0"><span className="collection-track" style={{ width: `${marqueeCopies.length * 100}%`, animationPlayState: "running", willChange: "transform" }}>{marqueeCopies.map((src, index) => <img key={index} src={imageReady ? src : placeholderImg(collection.name)} alt="" aria-hidden="true" className="collection-marquee-image object-cover" style={{ flex: `0 0 ${100 / marqueeCopies.length}%`, width: `${100 / marqueeCopies.length}%` }} />)}</span></span>
+        {marqueeCopies.length > 0 && <span className="collection-marquee collection-marquee-full absolute inset-0"><span className="collection-track" style={{ width: `${marqueeCopies.length * 100}%`, animationPlayState: "running", willChange: "transform" }}>{marqueeCopies.map((src, index) => <img key={index} src={imageReady ? src : undefined} alt="" aria-hidden="true" className="collection-marquee-image object-cover" style={{ flex: `0 0 ${100 / marqueeCopies.length}%`, width: `${100 / marqueeCopies.length}%` }} />)}</span></span>}
+        {marqueeCopies.length === 0 && <span className="absolute inset-0 grid place-items-center text-sm text-sand/80">Collection image unavailable</span>}
         <span className="absolute inset-0 bg-gradient-to-t from-cocoa via-cocoa/35 to-black/10" />
         <span className="relative z-10 h-full p-7 md:p-8 flex flex-col justify-end"><span className="font-display text-4xl">{collection.name}</span><span className="mt-2 text-sm text-sand/85 leading-relaxed max-w-[22rem]">{collection.description}</span><Link to={collection.link_path || `/collections?category=${collection.tile_key}`} onClick={(event) => event.stopPropagation()} className="mt-5 text-[10px] uppercase tracking-[.18em] border-b border-sand/70 pb-2 w-fit">Explore collection →</Link></span>
       </span>

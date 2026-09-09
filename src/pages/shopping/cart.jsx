@@ -61,7 +61,7 @@ export default function Cart() {
       const stock = Number(line.product?.stock);
       if (Number.isFinite(stock) && line.quantity > stock) {
         adjusted = true;
-        updateQuantity(line.product_id, stock);
+        updateQuantity(line.product_id, stock, line.product);
       }
     });
     if (adjusted) setStockAdjusted(true);

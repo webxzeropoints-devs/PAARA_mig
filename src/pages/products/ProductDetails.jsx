@@ -7,11 +7,6 @@ import { useCart } from "../../lib/cart.jsx";
 import { fadeUp } from "../../lib/motion";
 import Seo from "../../components/Seo";
 
-const placeholderImg = (label, idx = 0) =>
-  `data:image/svg+xml;utf8,${encodeURIComponent(
-    `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 400 400'><defs><linearGradient id='g' x1='0' x2='1' y1='0' y2='1'><stop offset='0' stop-color='#EFE4D2'/><stop offset='1' stop-color='#DAC5A1'/></linearGradient></defs><rect width='400' height='400' fill='url(#g)'/><text x='50%' y='52%' text-anchor='middle' font-family='serif' font-size='22' fill='#6B4A33'>${label} ${idx + 1}</text></svg>`
-  )}`;
-
 const formatPrice = (n) =>
   typeof n === "number" ? `₹${n.toLocaleString("en-IN")}` : "—";
 
@@ -54,10 +49,9 @@ export default function ProductDetails() {
     };
   }, [slug]);
 
-  const images =
-    product?.images && product.images.length
-      ? product.images.slice(0, 3)
-      : Array.from({ length: 3 }).map((_, i) => placeholderImg(product?.name || "Paara", i));
+  const images = Array.isArray(product?.images)
+    ? product.images.filter(Boolean).slice(0, 3)
+    : [];
 
   const handleAddToCart = () => {
     if (!product) return;
@@ -104,7 +98,7 @@ export default function ProductDetails() {
   const price = product.price ?? 0;
   const cartQuantity = items.find((item) => String(item.product_id) === String(product.id))?.quantity || 0;
   const stock = Number(product.stock);
-  const hasStock = !Number.isFinite(stock) || stock > 0;
+  const hasStock = Number.isFinite(stock) && stock > 0;
   const maxReached = Number.isFinite(stock) && cartQuantity >= stock;
 
   return (
@@ -120,7 +114,11 @@ export default function ProductDetails() {
 
         <div className="grid md:grid-cols-2 gap-10 md:gap-16 items-start">
           <motion.div initial="hidden" animate="show" variants={fadeUp}>
-            <div className="grid grid-cols-[80px_1fr] gap-3">
+            {images.length === 0 ? (
+              <div className="aspect-square rounded-sm border border-red-200 bg-red-50 p-6 text-sm text-red-700">
+                Product images are unavailable. Please try again later.
+              </div>
+            ) : <div className="grid grid-cols-[80px_1fr] gap-3">
               <div className="flex flex-col gap-3">
                 {images.map((src, i) => (
                   <button
@@ -150,7 +148,7 @@ export default function ProductDetails() {
                   </span>
                 )}
               </div>
-            </div>
+            </div>}
           </motion.div>
 
           <motion.div initial="hidden" animate="show" variants={fadeUp}>
@@ -236,9 +234,9 @@ export default function ProductDetails() {
                   As seen on Instagram
                 </p>
                 <div className="grid grid-cols-3 gap-2">
-                  {product.instagram.slice(0, 6).map((src, i) => (
+                  {product.instagram.slice(0, 6).map((entry, i) => (
                     <div key={i} className="aspect-square bg-shell rounded-sm overflow-hidden">
-                      <img src={src} alt="" className="w-full h-full object-cover" />
+                      <img src={entry.image_url || entry} alt="" className="w-full h-full object-cover" />
                     </div>
                   ))}
                 </div>

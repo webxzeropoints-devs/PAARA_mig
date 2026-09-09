@@ -43,13 +43,21 @@ export function CartProvider({ children }) {
     });
   }, []);
 
-  const updateQuantity = useCallback((product_id, quantity) => {
+  const updateQuantity = useCallback((product_id, quantity, product = null) => {
     const nextQuantity = Math.floor(Number(quantity));
     setItems((prev) => {
       if (!Number.isFinite(nextQuantity) || nextQuantity <= 0) return prev.filter((i) => i.product_id !== product_id);
-      return prev.map((i) =>
-        i.product_id === product_id ? { ...i, quantity: nextQuantity } : i
-      );
+      return prev.map((i) => {
+        if (i.product_id !== product_id) return i;
+        const stock = Number(product?.stock ?? i.stock);
+        return {
+          ...i,
+          ...(product ? { name: product.name, price: product.price, stock } : {}),
+          quantity: Number.isFinite(stock) && stock >= 0
+            ? Math.min(nextQuantity, stock)
+            : nextQuantity,
+        };
+      }).filter((i) => i.product_id !== product_id || i.quantity > 0);
     });
   }, []);
 
