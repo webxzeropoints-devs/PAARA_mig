@@ -202,9 +202,9 @@ function MeetOwner() {
       .catch(() => {});
     return () => { cancelled = true; };
   }, []);
-  const ownerPhotoSrc = !ownerPhotoFailed
-    ? (cacheBustUrl(ownerPhoto, ownerPhotoVersion) || "/assets/founder-placeholder.svg")
-    : "/assets/founder-placeholder.svg";
+  const ownerPhotoSrc = !ownerPhotoFailed && ownerPhoto
+    ? cacheBustUrl(ownerPhoto, ownerPhotoVersion)
+    : "";
   const togglePlayback = async () => {
     const video = videoRef.current;
     if (!video) return;
@@ -224,7 +224,13 @@ function MeetOwner() {
         <div className="relative flex flex-col sm:flex-row items-center sm:items-start gap-9 md:gap-10 text-center sm:text-left">
           <div className="relative shrink-0">
             <div className="founder-pearl-ring relative w-52 h-52">
-              <img src={ownerPhotoSrc} alt="Meet the Owner" onError={() => setOwnerPhotoFailed(true)} className="absolute inset-4 h-[calc(100%-2rem)] w-[calc(100%-2rem)] object-cover rounded-[48%_52%_45%_55%/55%_44%_56%_45%]" />
+              {ownerPhotoSrc ? (
+                <img src={ownerPhotoSrc} alt="Meet the Owner" onError={() => setOwnerPhotoFailed(true)} className="absolute inset-4 h-[calc(100%-2rem)] w-[calc(100%-2rem)] object-cover rounded-[48%_52%_45%_55%/55%_44%_56%_45%]" />
+              ) : (
+                <div className="absolute inset-4 grid place-items-center rounded-[48%_52%_45%_55%/55%_44%_56%_45%] bg-sand px-5 text-center text-xs text-cocoa/60">
+                  Owner image unavailable
+                </div>
+              )}
             </div>
           </div>
           <div className="max-w-sm pt-1">

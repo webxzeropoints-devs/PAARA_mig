@@ -10,6 +10,7 @@ import {
   adminDeleteCoupon,
   adminListCoupons,
   adminUpdateCoupon,
+  toBoolean,
 } from "../lib/api";
 
 const EMPTY = {
@@ -122,12 +123,12 @@ export default function AdminCoupons() {
                     <td className="px-4 py-3 text-center">
                       <span
                         className={`inline-block px-2 py-0.5 rounded text-[10px] uppercase tracking-[.14em] ${
-                          Number(coupon.is_active)
+                          toBoolean(coupon.is_active)
                             ? "bg-gold/20 text-cocoa"
                             : "bg-sand text-cocoa/45"
                         }`}
                       >
-                        {Number(coupon.is_active) ? "On" : "Off"}
+                        {toBoolean(coupon.is_active) ? "On" : "Off"}
                       </span>
                     </td>
                     <td className="px-4 py-3 text-right">
@@ -188,7 +189,7 @@ function CouponModal({ coupon, onClose, onSaved }) {
           discount_type: coupon.discount_type,
           discount_value: String(coupon.discount_value),
           deadline: toLocalInput(coupon.deadline),
-          is_active: Number(coupon.is_active) === 1,
+          is_active: toBoolean(coupon.is_active),
         }
       : EMPTY
   );

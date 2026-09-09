@@ -15,6 +15,7 @@ import {
   adminSetVault,
   adminUpdateCategory,
   adminUpdateProduct,
+  toBoolean,
 } from "../lib/api";
 
 const getLocalDateTimeInputValue = () => {
@@ -105,14 +106,14 @@ export default function AdminDashboard() {
   };
 
   const vaultIds = useMemo(
-    () => products.filter((p) => Number(p.is_vault) === 1).sort(
+    () => products.filter((p) => toBoolean(p.is_vault)).sort(
       (a, b) => (a.vault_sort_order ?? 0) - (b.vault_sort_order ?? 0)
     ).map((p) => p.id),
     [products]
   );
   // fallback: any product flagged as vault even without sort_order
   const vaultFallback = useMemo(
-    () => products.filter((p) => Number(p.is_vault) === 1).map((p) => p.id),
+    () => products.filter((p) => toBoolean(p.is_vault)).map((p) => p.id),
     [products]
   );
   const vaultSelection = vaultIds.length === 3 ? vaultIds : vaultFallback.slice(0, 3);
@@ -251,11 +252,11 @@ export default function AdminDashboard() {
                       <button
                         type="button"
                         onClick={() => onToggleBestseller(product)}
-                        aria-pressed={Number(product.is_bestseller) === 1}
-                        className={`inline-block h-5 w-9 rounded-full transition-colors ${Number(product.is_bestseller) === 1 ? "bg-gold" : "bg-cocoa/15"}`}
+                        aria-pressed={toBoolean(product.is_bestseller)}
+                        className={`inline-block h-5 w-9 rounded-full transition-colors ${toBoolean(product.is_bestseller) ? "bg-gold" : "bg-cocoa/15"}`}
                       >
                         <span
-                          className={`block h-4 w-4 rounded-full bg-shell transform transition-transform ${Number(product.is_bestseller) === 1 ? "translate-x-4" : "translate-x-0.5"}`}
+                          className={`block h-4 w-4 rounded-full bg-shell transform transition-transform ${toBoolean(product.is_bestseller) ? "translate-x-4" : "translate-x-0.5"}`}
                         />
                       </button>
                     </td>
@@ -694,9 +695,9 @@ function ProductEditor({ product, categories, onClose, onSaved }) {
           material: product.material || "",
           subcategory: product.subcategory || "",
           stock: product.stock ?? 0,
-          is_exclusive: !!Number(product.is_exclusive),
-          is_bestseller: !!Number(product.is_bestseller),
-          is_active: product.is_active === undefined ? true : !!Number(product.is_active),
+          is_exclusive: toBoolean(product.is_exclusive),
+          is_bestseller: toBoolean(product.is_bestseller),
+          is_active: product.is_active === undefined ? true : toBoolean(product.is_active),
           release_date: (product.release_date || "").replace(" ", "T").slice(0, 16),
           images: product.images?.map(url => ({ url, file: null })) || [],
         }

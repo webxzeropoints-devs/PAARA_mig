@@ -12,12 +12,12 @@ const RESEND_COOLDOWN_SECONDS = 30;
  *
  * Props:
  * - title, subtitle: copy shown above the input
- * - onVerified(): called once the correct demo code is entered
+ * - onVerified(): called once the emailed code is entered
  * - onBack(): optional, shown as a "back" link
  */
 export default function OTPVerification({
   title = "Verify it's you",
-  subtitle = "Enter the 6-digit code we've sent (demo).",
+  subtitle = "Enter the 6-digit code we've sent to your email.",
   onVerified,
   onResend,
   onBack,

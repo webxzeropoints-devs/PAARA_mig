@@ -185,7 +185,7 @@ model Order {
   totalAmount             Float                @map("total_amount")
   status                  String               @default("Order Confirmed")
   paymentStatus           String               @default("unpaid") @map("payment_status")
-  paymentMethod           String               @default("razorpay") @map("payment_method")
+  paymentMethod           String               @default("payu") @map("payment_method")
   razorpayOrderId         String?              @map("razorpay_order_id")
   razorpayPaymentId       String?              @map("razorpay_payment_id")
   paymentReference        String?              @map("payment_reference")

@@ -8,6 +8,7 @@ import {
   adminListCoupons,
   adminRequest,
   adminUpdateCoupon,
+  toBoolean,
 } from "../lib/api";
 
 const EMPTY_COUPON = {
@@ -139,7 +140,7 @@ export default function AdminPromotions() {
     setLoyaltyForm({
       product_id: String(rule.product_id),
       gift_card_value: String(rule.gift_card_value),
-      is_active: Number(rule.is_active) === 1,
+      is_active: toBoolean(rule.is_active),
     });
     setActiveTab("loyalty");
   };
@@ -149,7 +150,7 @@ export default function AdminPromotions() {
       await adminRequest(`/admin/gift-card-rules/${rule.id}`, { method: "PUT", body: {
         product_id: rule.product_id,
         gift_card_value: rule.gift_card_value,
-        is_active: Number(rule.is_active) !== 1,
+        is_active: !toBoolean(rule.is_active),
       } });
       await loadLoyaltyRules();
     } catch (err) {
@@ -248,8 +249,8 @@ export default function AdminPromotions() {
                           {coupon.deadline ? new Date(String(coupon.deadline).replace(" ", "T")).toLocaleString() : "—"}
                         </td>
                         <td className="px-4 py-3 text-center">
-                          <span className={`inline-block px-2 py-0.5 rounded text-[10px] uppercase tracking-[.14em] ${Number(coupon.is_active) ? "bg-gold/20 text-cocoa" : "bg-sand text-cocoa/45"}`}>
-                            {Number(coupon.is_active) ? "On" : "Off"}
+                          <span className={`inline-block px-2 py-0.5 rounded text-[10px] uppercase tracking-[.14em] ${toBoolean(coupon.is_active) ? "bg-gold/20 text-cocoa" : "bg-sand text-cocoa/45"}`}>
+                            {toBoolean(coupon.is_active) ? "On" : "Off"}
                           </span>
                         </td>
                         <td className="px-4 py-3 text-right">
@@ -328,10 +329,10 @@ export default function AdminPromotions() {
                   <tr key={rule.id} className="border-b border-cocoa/10 odd:bg-sand/35">
                     <td className="px-4 py-3 font-product-name text-cocoa">{rule.product_name}</td>
                     <td className="px-4 py-3 text-cocoa font-numeric">₹{Number(rule.gift_card_value).toLocaleString("en-IN")}</td>
-                    <td className="px-4 py-3 text-xs uppercase tracking-widest text-cocoa/60">{Number(rule.is_active) ? "Active" : "Inactive"}</td>
+                    <td className="px-4 py-3 text-xs uppercase tracking-widest text-cocoa/60">{toBoolean(rule.is_active) ? "Active" : "Inactive"}</td>
                     <td className="px-4 py-3 text-right">
                       <div className="inline-flex gap-2">
-                        <button type="button" onClick={() => toggleLoyaltyRule(rule)} className="px-2 py-1 text-[10px] uppercase tracking-widest text-gold">{Number(rule.is_active) ? "Deactivate" : "Activate"}</button>
+                        <button type="button" onClick={() => toggleLoyaltyRule(rule)} className="px-2 py-1 text-[10px] uppercase tracking-widest text-gold">{toBoolean(rule.is_active) ? "Deactivate" : "Activate"}</button>
                         <button type="button" onClick={() => editLoyaltyRule(rule)} className="p-2 text-gold" aria-label="Edit loyalty rule"><Edit size={15} /></button>
                         <button type="button" onClick={() => removeLoyaltyRule(rule)} className="p-2 text-cocoa" aria-label="Delete loyalty rule"><Trash2 size={15} /></button>
                       </div>
@@ -375,7 +376,7 @@ function CouponModal({ coupon, onClose, onSaved }) {
           discount_type: coupon.discount_type,
           discount_value: String(coupon.discount_value),
           deadline: toLocalInput(coupon.deadline),
-          is_active: Number(coupon.is_active) === 1,
+          is_active: toBoolean(coupon.is_active),
         }
       : EMPTY_COUPON
   );

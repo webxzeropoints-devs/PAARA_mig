@@ -218,18 +218,47 @@ router.post('/verify', requireAuth, async (req, res) => {
   }
 });
 
+const getFrontendOrigin = () => {
+  const configured = String(process.env.FRONTEND_URL || '')
+    .split(',')
+    .map((value) => value.trim())
+    .find(Boolean);
+  return configured ? configured.replace(/\/$/, '') : null;
+};
+
 const payuCallback = (expectedStatus) => async (req, res) => {
   try {
     const result = await processPayuCallback(req.body || {}, expectedStatus);
-    return res.json({ received: true, ...result });
+    const frontendOrigin = getFrontendOrigin();
+    if (!frontendOrigin) return res.json({ received: true, ...result });
+    const redirectUrl = new URL('/order-confirmation', frontendOrigin);
+    redirectUrl.searchParams.set('order_id', String(result.orderId));
+    redirectUrl.searchParams.set('payment', result.paid ? 'success' : 'failure');
+    return res.redirect(303, redirectUrl.toString());
   } catch (error) {
     console.error('[PAYU_CALLBACK_FAILED]', { message: maskSensitiveText(error.message), name: error.name });
+    const frontendOrigin = getFrontendOrigin();
+    if (frontendOrigin) {
+      const redirectUrl = new URL('/order-confirmation', frontendOrigin);
+      redirectUrl.searchParams.set('payment', 'failure');
+      return res.redirect(303, redirectUrl.toString());
+    }
+    return res.status(400).json({ received: false, error: error.message });
+  }
+};
+
+const payuWebhook = async (req, res) => {
+  try {
+    const result = await processPayuCallback(req.body || {}, 'success');
+    return res.json({ received: true, ...result });
+  } catch (error) {
+    console.error('[PAYU_WEBHOOK_FAILED]', { message: maskSensitiveText(error.message), name: error.name });
     return res.status(400).json({ received: false, error: error.message });
   }
 };
 
 router.post('/payu/success', payuCallback('success'));
 router.post('/payu/failure', payuCallback('failure'));
-router.post('/webhook', payuCallback('success'));
+router.post('/webhook', payuWebhook);
 
 module.exports = router;
