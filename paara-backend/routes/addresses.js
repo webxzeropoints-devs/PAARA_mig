@@ -135,4 +135,96 @@ router.post('/', requireAuth, async (req, res) => {
   }
 });
 
+router.put('/:id', requireAuth, async (req, res) => {
+  const addressId = Number.parseInt(req.params.id, 10);
+  const { line1, line2, city, state, pincode, lat, lng, is_default } = req.body || {};
+
+  if (!Number.isInteger(addressId) || addressId < 1) {
+    return res.status(400).json({ error: 'A valid address ID is required.' });
+  }
+  if (![line1, city, state, pincode].every((value) => typeof value === 'string' && value.trim())) {
+    return res.status(400).json({ error: 'line1, city, state and pincode are required.' });
+  }
+
+  const latitude = lat == null || lat === '' ? null : Number(lat);
+  const longitude = lng == null || lng === '' ? null : Number(lng);
+  if ((latitude != null && !Number.isFinite(latitude)) || (longitude != null && !Number.isFinite(longitude))) {
+    return res.status(400).json({ error: 'lat and lng must be valid numbers.' });
+  }
+
+  const client = await db.pool.connect();
+  try {
+    await client.query('BEGIN');
+    const existing = await client.query(
+      'SELECT id FROM addresses WHERE id = $1 AND customer_id = $2',
+      [addressId, req.customer.id]
+    );
+    if (existing.rowCount === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Address not found.' });
+    }
+    if (Boolean(is_default)) {
+      await client.query('UPDATE addresses SET is_default = FALSE WHERE customer_id = $1', [req.customer.id]);
+    }
+    const result = await client.query(`
+      UPDATE addresses
+      SET line1 = $1, line2 = $2, city = $3, state = $4, pincode = $5,
+          lat = $6, lng = $7, is_default = $8
+      WHERE id = $9 AND customer_id = $10
+      RETURNING *
+    `, [
+      line1.trim(), line2?.trim() || null, city.trim(), state.trim(), pincode.trim(),
+      latitude, longitude, Boolean(is_default), addressId, req.customer.id,
+    ]);
+    await client.query('COMMIT');
+    return res.json(result.rows[0]);
+  } catch (error) {
+    try { await client.query('ROLLBACK'); } catch {}
+    console.error('[ADDRESS_UPDATE_FAILED]', error.message);
+    return res.status(500).json({ error: 'Address could not be updated. Please try again.' });
+  } finally {
+    client.release();
+  }
+});
+
+router.delete('/:id', requireAuth, async (req, res) => {
+  const addressId = Number.parseInt(req.params.id, 10);
+  if (!Number.isInteger(addressId) || addressId < 1) {
+    return res.status(400).json({ error: 'A valid address ID is required.' });
+  }
+  const client = await db.pool.connect();
+  try {
+    await client.query('BEGIN');
+    const deleted = await client.query(`
+      DELETE FROM addresses
+      WHERE id = $1 AND customer_id = $2
+      RETURNING is_default
+    `, [addressId, req.customer.id]);
+    if (deleted.rowCount === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Address not found.' });
+    }
+    if (deleted.rows[0].is_default) {
+      await client.query(`
+        UPDATE addresses
+        SET is_default = TRUE
+        WHERE id = (
+          SELECT id FROM addresses
+          WHERE customer_id = $1
+          ORDER BY id DESC
+          LIMIT 1
+        )
+      `, [req.customer.id]);
+    }
+    await client.query('COMMIT');
+    return res.json({ success: true });
+  } catch (error) {
+    try { await client.query('ROLLBACK'); } catch {}
+    console.error('[ADDRESS_DELETE_FAILED]', error.message);
+    return res.status(500).json({ error: 'Address could not be deleted. Please try again.' });
+  } finally {
+    client.release();
+  }
+});
+
 module.exports = router;

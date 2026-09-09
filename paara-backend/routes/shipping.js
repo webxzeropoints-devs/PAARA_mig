@@ -31,6 +31,11 @@ router.post('/quote', (req, res) => {
   } = req.body || {};
 
   try {
+    if (String(payment_method).trim().toLowerCase() !== 'payu') {
+      return res.status(400).json({
+        error: 'PayU is the only available payment method.',
+      });
+    }
     return res.json(
       calculateShipping({
         city,

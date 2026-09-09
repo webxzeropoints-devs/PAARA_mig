@@ -235,6 +235,8 @@ export const postShippingQuote = (payload) => apiPost("/shipping/quote", payload
 
 export const getAddresses = () => apiGet("/addresses");
 export const postAddress = (payload) => apiPost("/addresses", payload);
+export const updateAddress = (id, payload) => apiPut(`/addresses/${encodeURIComponent(id)}`, payload);
+export const deleteAddress = (id) => apiDelete(`/addresses/${encodeURIComponent(id)}`);
 
 export const postOrder = (payload) => apiPost("/orders", payload);
 export const createPayuCheckout = (order_id) => apiPost("/payment/create", { order_id });

@@ -1,5 +1,4 @@
-﻿const { round2 } = require('./pricing');
-const db = require('../db/database.pg');
+const { round2 } = require('./pricing');
 
 const RATES = {
   chennai: { online: 70, cod: 90 },

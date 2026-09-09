@@ -1,8 +1,8 @@
 import React, { useEffect, useState } from "react";
-import { Plus } from "lucide-react";
+import { Pencil, Plus, Trash2 } from "lucide-react";
 
 import AccountPageLayout from "./AccountPageLayout";
-import { getAddresses, postAddress } from "../../lib/api";
+import { deleteAddress, getAddresses, postAddress, updateAddress } from "../../lib/api";
 import { INDIAN_STATES, STATE_CITIES } from "../../lib/locations";
 
 const emptyForm = { line1: "", line2: "", city: "", state: "", pincode: "" };
@@ -13,6 +13,7 @@ export default function Addresses() {
   const [form, setForm] = useState(emptyForm);
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
+  const [editingId, setEditingId] = useState(null);
 
   useEffect(() => {
     getAddresses()
@@ -26,15 +27,31 @@ export default function Addresses() {
     setShowForm(true);
   };
 
+  const openEdit = (address) => {
+    setForm({
+      line1: address.line1 || "",
+      line2: address.line2 || "",
+      city: address.city || "",
+      state: address.state || "",
+      pincode: address.pincode || "",
+    });
+    setEditingId(address.id);
+    setError("");
+    setShowForm(true);
+  };
+
   const onSubmit = async (e) => {
     e.preventDefault();
     setError("");
     setSaving(true);
     try {
-      const created = await postAddress({ ...form, is_default: addresses.length === 0 });
-      setAddresses((prev) => [created, ...prev.filter((address) => address.id !== created.id)]);
+      const saved = editingId
+        ? await updateAddress(editingId, { ...form, is_default: addresses.find((address) => address.id === editingId)?.is_default || false })
+        : await postAddress({ ...form, is_default: addresses.length === 0 });
+      setAddresses((prev) => [saved, ...prev.filter((address) => address.id !== saved.id)]);
       setShowForm(false);
       setForm(emptyForm);
+      setEditingId(null);
     } catch (err) {
       setError(err.message || "Could not save address.");
     } finally {
@@ -51,6 +68,39 @@ export default function Addresses() {
           className="inline-flex items-center gap-2 bg-gold text-white px-5 py-2.5 text-xs uppercase tracking-widest hover:bg-cocoa transition-colors"
         >
           <Plus size={14} /> Add address
+        </button>
+      </div>
+      <div className="flex shrink-0 gap-2">
+        {!address.is_default && <button type="button" onClick={async () => {
+          try {
+            const updated = await updateAddress(address.id, {
+              line1: address.line1,
+              line2: address.line2 || "",
+              city: address.city,
+              state: address.state,
+              pincode: address.pincode,
+              is_default: true,
+            });
+            setAddresses((prev) => prev.map((item) => ({ ...item, is_default: item.id === updated.id })));
+          } catch (err) {
+            setError(err.message || "Could not set default address.");
+          }
+        }} className="text-xs uppercase tracking-widest text-cocoa/60">
+          Make default
+        </button>}
+        <button type="button" onClick={() => openEdit(address)} className="inline-flex items-center gap-1 text-xs uppercase tracking-widest text-gold">
+          <Pencil size={13} /> Edit
+        </button>
+        <button type="button" onClick={async () => {
+          if (!window.confirm("Delete this address?")) return;
+          try {
+            await deleteAddress(address.id);
+            setAddresses((prev) => prev.filter((item) => item.id !== address.id));
+          } catch (err) {
+            setError(err.message || "Could not delete address.");
+          }
+        }} className="inline-flex items-center gap-1 text-xs uppercase tracking-widest text-red-700">
+          <Trash2 size={13} /> Delete
         </button>
       </div>
 
@@ -78,6 +128,7 @@ export default function Addresses() {
               type="button"
               onClick={() => {
                 setShowForm(false);
+                setEditingId(null);
               }}
               className="px-6 py-2.5 text-xs uppercase tracking-widest text-cocoa/60 hover:text-cocoa transition-colors"
             >
