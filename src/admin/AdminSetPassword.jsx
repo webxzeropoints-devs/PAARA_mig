@@ -2,7 +2,7 @@ import React, { useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
 
-import { apiPost } from "../lib/api";
+import { adminRequest } from "../lib/api";
 import { fadeUp } from "../lib/motion";
 import { isStrongPassword, PASSWORD_ERROR } from "../lib/validation";
 import PasswordRequirements from "../components/PasswordRequirements";
@@ -48,7 +48,7 @@ export default function AdminSetPassword() {
     setLoading(true);
 
     try {
-      await apiPost("/admin-auth/set-password", {
+      await adminRequest("/admin-auth/set-password", {
         admin_id: adminId,
         new_password: password,
         new_email: trimmedEmail.toLowerCase(),

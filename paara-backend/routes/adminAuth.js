@@ -72,7 +72,10 @@ router.post('/login', async (req, res) => {
   });
 });
 
-router.post('/set-password', async (req, res) => {
+router.post('/set-password', requireAdminSession, async (req, res) => {
+  if (String(req.admin.id) !== String(req.body?.admin_id)) {
+    return res.status(403).json({ error: 'You can only update your own admin account.' });
+  }
   const { admin_id, new_password, new_email } = req.body;
   const normalizedEmail = normalizeEmail(new_email);
 

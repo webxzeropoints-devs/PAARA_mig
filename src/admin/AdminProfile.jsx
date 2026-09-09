@@ -4,7 +4,7 @@
 import React, { useEffect, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 
-import { adminChangeEmail, adminChangePassword, adminChangeProfilePicture, apiPost } from "../lib/api";
+import { adminChangeEmail, adminChangePassword, adminChangeProfilePicture, adminRequest } from "../lib/api";
 import { useAdmin } from "../lib/adminAuth.jsx";
 import { isStrongPassword, PASSWORD_ERROR } from "../lib/validation";
 import PasswordRequirements from "../components/PasswordRequirements";
@@ -122,7 +122,7 @@ export default function AdminProfile() {
       if (!adminId) {
         throw new Error("Admin account info is missing.");
       }
-      await apiPost("/admin-auth/set-password", {
+      await adminRequest("/admin-auth/set-password", {
         admin_id: adminId,
         new_password: setupPassword,
         new_email: trimmedEmail.toLowerCase(),
