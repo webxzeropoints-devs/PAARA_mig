@@ -30,13 +30,16 @@ export function CartProvider({ children }) {
 
   const addItem = useCallback((product_id, quantity = 1, product = null) => {
     setItems((prev) => {
+      const stock = Number(product?.stock);
+      if (Number.isFinite(stock) && stock <= 0) return prev;
       const idx = prev.findIndex((i) => i.product_id === product_id);
       if (idx >= 0) {
         const next = [...prev];
-        next[idx] = { ...next[idx], quantity: next[idx].quantity + quantity };
+        const requested = next[idx].quantity + quantity;
+        next[idx] = { ...next[idx], ...(product ? { name: product.name, price: product.price, stock } : {}), quantity: Number.isFinite(stock) ? Math.min(requested, stock) : requested };
         return next;
       }
-      return [...prev, { product_id, quantity, ...(product ? { name: product.name, price: product.price } : {}) }];
+      return [...prev, { product_id, quantity: Number.isFinite(stock) ? Math.min(quantity, stock) : quantity, ...(product ? { name: product.name, price: product.price, stock } : {}) }];
     });
   }, []);
 

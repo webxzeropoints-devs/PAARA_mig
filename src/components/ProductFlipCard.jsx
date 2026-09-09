@@ -24,6 +24,9 @@ export default function ProductFlipCard({ product, index = 0, compact = false, b
   const { isSaved, toggle } = useWishlist();
   const productId = product?.id ?? product?.slug;
   const saved = productId != null && isSaved(productId);
+  const stock = Number(product?.stock);
+  const isOutOfStock = Number.isFinite(stock) && stock <= 0;
+  const isLowStock = stock === 1;
 
   const images = Array.isArray(product?.images) && product.images.length
     ? product.images.filter(Boolean)
@@ -66,10 +69,10 @@ export default function ProductFlipCard({ product, index = 0, compact = false, b
       viewport={disableReveal ? undefined : { once: true }}
       whileHover={bestseller ? { y: -8, boxShadow: "0 10px 15px -3px rgba(0, 0, 0, 0.1)", transition: { duration: 0.3, ease: "easeOut" } } : undefined}
       transition={disableReveal ? { duration: 0 } : { duration: 0.6, delay: bestseller ? (index + 1) * 0.1 : index * 0.08, ease: [0.16, 1, 0.3, 1] }}
-      className={`group relative ${compact ? "w-56 md:w-64 shrink-0" : "w-full"} ${boutique ? "max-w-[280px] mx-auto" : ""}`}
+      className={`group relative min-w-0 ${compact ? "w-56 md:w-64 shrink-0" : "w-full"} ${boutique ? "max-w-[280px] mx-auto" : ""}`}
     >
       <div
-        className={`relative w-full aspect-square sm:aspect-[4/5] ${disableFlip ? "" : "[perspective:1200px] cursor-pointer"}`}
+        className={`relative w-full aspect-[4/5] ${disableFlip ? "" : "[perspective:1200px] cursor-pointer"}`}
         {...(!disableFlip && {
           onClick: onActivate,
           role: "button",
@@ -115,6 +118,11 @@ export default function ProductFlipCard({ product, index = 0, compact = false, b
             {product?.is_exclusive && (
               <span className="absolute top-1.5 left-1.5 sm:top-3 sm:left-3 px-1.5 py-0.5 sm:px-3 sm:py-1 bg-espresso-ink/85 text-pearl font-script italic text-xs sm:text-sm rounded-sm tracking-wide">
                 Exclusive
+              </span>
+            )}
+            {(isLowStock || isOutOfStock) && (
+              <span className={`absolute bottom-2 left-2 rounded-sm px-2 py-1 text-[10px] uppercase tracking-wide ${isOutOfStock ? "bg-cocoa/85 text-white" : "bg-gold/90 text-white"}`}>
+                {isOutOfStock ? "Out of stock" : "Only 1 left"}
               </span>
             )}
             <button

@@ -181,15 +181,16 @@ export default function Collections() {
             </button>
           </aside>
 
-          <section>
-            <button
-              type="button"
-              onClick={openMobileFilters}
-              className="mb-5 flex w-full items-center justify-between rounded-sm border border-cocoa/15 bg-sand/60 px-4 py-3 text-xs uppercase tracking-widest md:hidden"
-            >
-              <span className="flex items-center gap-2"><Filter size={15} aria-hidden="true" /> Filters</span>
-              {activeFilterCount > 0 && <span className="grid h-5 min-w-5 place-items-center rounded-full bg-gold px-1 text-[10px] text-white">{activeFilterCount}</span>}
-            </button>
+          <section className="min-w-0">
+            <div className="mb-5 flex gap-2 md:hidden">
+              <button type="button" onClick={openMobileFilters} className="flex flex-1 items-center justify-between rounded-sm border border-cocoa/15 bg-sand/60 px-3 py-3 text-xs uppercase tracking-widest">
+                <span className="flex items-center gap-2"><Filter size={15} aria-hidden="true" /> Filters</span>
+                {activeFilterCount > 0 && <span className="grid h-5 min-w-5 place-items-center rounded-full bg-gold px-1 text-[10px] text-white">{activeFilterCount}</span>}
+              </button>
+              <select value={filters.sort} onChange={(e) => setFilter("sort", e.target.value)} aria-label="Sort products" className="min-w-0 flex-1 rounded-sm border border-cocoa/15 bg-sand/60 px-2 py-3 text-xs font-semibold outline-none">
+                {SORTS.map((s) => <option key={s.value} value={s.value}>{s.label.replace("Sort by: ", "")}</option>)}
+              </select>
+            </div>
             {error && (
               <div className="text-xs text-red-700 bg-red-50 border border-red-100 px-3 py-2 rounded-sm mb-6">
                 {error}
@@ -217,10 +218,10 @@ export default function Collections() {
                 variants={gridParent}
                 initial="hidden"
                 animate="show"
-                className="grid grid-cols-3 gap-2 sm:gap-4"
+                className="grid grid-cols-2 gap-x-3 gap-y-8 sm:gap-4 md:grid-cols-3"
               >
                 {products.map((p, i) => (
-                  <motion.div key={p.id || p.slug} variants={childFadeUp}>
+                  <motion.div key={p.id || p.slug} variants={childFadeUp} className="min-w-0">
                     <ProductFlipCard product={p} index={i} navigateOnClick />
                   </motion.div>
                 ))}

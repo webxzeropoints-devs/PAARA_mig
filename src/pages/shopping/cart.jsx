@@ -11,6 +11,7 @@ export default function Cart() {
   const { items, updateQuantity, removeItem, count } = useCart();
   const [products, setProducts] = useState({});
   const [loading, setLoading] = useState(false);
+  const [stockAdjusted, setStockAdjusted] = useState(false);
 
   // Resolve product details (name/price/images) for each cart line.
   useEffect(() => {
@@ -53,6 +54,18 @@ export default function Cart() {
       };
     });
   }, [items, products]);
+
+  useEffect(() => {
+    let adjusted = false;
+    lines.forEach((line) => {
+      const stock = Number(line.product?.stock);
+      if (Number.isFinite(stock) && line.quantity > stock) {
+        adjusted = true;
+        updateQuantity(line.product_id, stock);
+      }
+    });
+    if (adjusted) setStockAdjusted(true);
+  }, [lines, updateQuantity]);
 
   const subtotal = useMemo(
     () => lines.reduce((sum, l) => sum + l.subtotal, 0),
@@ -156,7 +169,8 @@ export default function Cart() {
                       </span>
                       <button
                         onClick={() => updateQuantity(line.product_id, line.quantity + 1)}
-                        className="w-8 h-8 text-sm hover:text-gold transition-colors"
+                        disabled={Number.isFinite(Number(line.product?.stock)) && line.quantity >= Number(line.product.stock)}
+                        className="w-8 h-8 text-sm hover:text-gold transition-colors disabled:cursor-not-allowed disabled:opacity-40"
                         aria-label="Increase quantity"
                       >
                         +
@@ -190,6 +204,7 @@ export default function Cart() {
             <p className="text-xs text-cocoa/50 mt-3 leading-relaxed">
               Product prices include applicable taxes. Shipping is added at checkout.
             </p>
+            {stockAdjusted && <p className="mt-3 text-xs text-red-700">Your bag was updated to match current stock availability.</p>}
             <motion.button
               whileTap={{ scale: 0.97 }}
               onClick={onCheckout}

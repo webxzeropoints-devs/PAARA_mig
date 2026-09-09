@@ -103,6 +103,9 @@ export default function ProductDetails() {
 
   const price = product.price ?? 0;
   const cartQuantity = items.find((item) => String(item.product_id) === String(product.id))?.quantity || 0;
+  const stock = Number(product.stock);
+  const hasStock = !Number.isFinite(stock) || stock > 0;
+  const maxReached = Number.isFinite(stock) && cartQuantity >= stock;
 
   return (
     <div className="min-h-[80vh] bg-sand text-cocoa font-body">
@@ -192,7 +195,8 @@ export default function ProductDetails() {
                   {quantity}
                 </span>
                 <button
-                  onClick={() => setQuantity((q) => q + 1)}
+                  onClick={() => setQuantity((q) => Number.isFinite(stock) ? Math.min(stock, q + 1) : q + 1)}
+                  disabled={Number.isFinite(stock) && quantity >= stock}
                   className="w-9 h-9 hover:text-gold transition-colors"
                   aria-label="Increase quantity"
                 >
@@ -205,18 +209,21 @@ export default function ProductDetails() {
               <motion.button
                 whileTap={{ scale: 0.97 }}
                 onClick={handleAddToCart}
-                className="bg-gold text-white px-8 py-3 text-xs uppercase tracking-widest hover:bg-cocoa transition-colors"
+                disabled={!hasStock || maxReached}
+                className="bg-gold text-white px-8 py-3 text-xs uppercase tracking-widest hover:bg-cocoa transition-colors disabled:cursor-not-allowed disabled:opacity-50"
               >
-                {added ? "✓ Added to cart" : cartQuantity > 0 ? `Add to cart · In bag: ${cartQuantity}` : "Add to cart"}
+                {!hasStock ? "Out of stock" : added ? "✓ Added to cart" : maxReached ? "Maximum in bag" : cartQuantity > 0 ? `Add to cart · In bag: ${cartQuantity}` : "Add to cart"}
               </motion.button>
               <motion.button
                 whileTap={{ scale: 0.97 }}
                 onClick={handleBuyNow}
-                className="border border-cocoa/30 px-8 py-3 text-xs uppercase tracking-widest hover:bg-cocoa hover:text-white hover:border-cocoa transition-colors"
+                disabled={!hasStock || maxReached}
+                className="border border-cocoa/30 px-8 py-3 text-xs uppercase tracking-widest hover:bg-cocoa hover:text-white hover:border-cocoa transition-colors disabled:cursor-not-allowed disabled:opacity-50"
               >
                 Buy now
               </motion.button>
             </div>
+            {stock === 1 && <p className="mt-3 text-xs text-gold">Only 1 left</p>}
 
             {product.material && (
               <p className="text-xs text-cocoa/60 mt-6">
