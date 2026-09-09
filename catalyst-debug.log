@@ -1,0 +1,41 @@
+[debug] [2026-09-09T20:12:26.393Z] : 
+[debug] [2026-09-09T20:12:26.397Z] : ----------------------------------------------------------------------
+[debug] [2026-09-09T20:12:26.397Z] : Command:      C:\Program Files\nodejs\node.exe C:\Users\ANJANA S\AppData\Roaming\npm\node_modules\zcatalyst-cli\lib\bin\catalyst.js deploy appsail
+[debug] [2026-09-09T20:12:26.398Z] : CLI Version:  1.26.1
+[debug] [2026-09-09T20:12:26.398Z] : Platform:     win32
+[debug] [2026-09-09T20:12:26.398Z] : Node Version: v24.19.0
+[debug] [2026-09-09T20:12:26.398Z] : Time:         Thu Sep 10 2026 01:42:26 GMT+0530 (India Standard Time)
+[debug] [2026-09-09T20:12:26.398Z] : ----------------------------------------------------------------------
+[debug] [2026-09-09T20:12:26.398Z] : 
+[debug] [2026-09-09T20:12:28.337Z] : > authorizing via signed-in user option
+[debug] [2026-09-09T20:12:28.340Z] : > command requires scopes: ["ZohoCatalyst.projects.ALL","ZohoCatalyst.appsail.Update"]
+[debug] [2026-09-09T20:12:28.365Z] : > refreshing access token <
+[debug] [2026-09-09T20:12:28.368Z] : >>>> HTTP REQUEST : POST https://accounts.zoho.in/oauth/v2/token 
+<request body omitted>
+
+[debug] [2026-09-09T20:12:28.584Z] : <<<< HTTP RESPONSE : 200
+Response Headers: {"server":"ZGS","date":"Wed, 09 Sep 2026 20:12:28 GMT","content-type":"application/json;charset=UTF-8","content-length":"2523","connection":"keep-alive","cache-control":"no-store","x-content-type-options":"nosniff","pragma":"no-cache","x-frame-options":"SAMEORIGIN","vary":"accept-encoding","content-language":"en-US","strict-transport-security":"max-age=64072000; includeSubDomains; preload"}
+
+[debug] [2026-09-09T20:12:28.612Z] : >>>> HTTP REQUEST : GET https://api.catalyst.zoho.in/baas/v1/project/64283000000013127 
+
+[debug] [2026-09-09T20:12:28.814Z] : <<<< HTTP RESPONSE : 200
+Response Headers: {"server":"ZGS","date":"Wed, 09 Sep 2026 20:12:28 GMT","content-type":"application/vnd.catalyst.v2+json","transfer-encoding":"chunked","connection":"keep-alive","x-content-type-options":"nosniff","cache-control":"private,no-cache,no-store,max-age=0,must-revalidate","pragma":"no-cache","expires":"Thu, 01 Jan 1970 00:00:00 GMT","x-frame-options":"DENY","strict-transport-security":"max-age=64072000; includeSubDomains; preload"}
+
+[debug] [2026-09-09T20:12:28.820Z] : >>>> HTTP REQUEST : GET https://api.catalyst.zoho.in/baas/v1/project/64283000000013127/environment 
+
+[debug] [2026-09-09T20:12:28.880Z] : <<<< HTTP RESPONSE : 200
+Response Headers: {"server":"ZGS","date":"Wed, 09 Sep 2026 20:12:28 GMT","content-type":"application/vnd.catalyst.v2+json","transfer-encoding":"chunked","connection":"keep-alive","x-content-type-options":"nosniff","cache-control":"private,no-cache,no-store,max-age=0,must-revalidate","pragma":"no-cache","expires":"Thu, 01 Jan 1970 00:00:00 GMT","x-frame-options":"DENY","strict-transport-security":"max-age=64072000; includeSubDomains; preload"}
+
+[debug] [2026-09-09T20:12:28.950Z] : --source option not specified. Hence, using Catalyst runtime
+[debug] [2026-09-09T20:12:35.901Z] : [Error: ENOENT: no such file or directory, open 'E:\PAARA-main-pg-migration\app-config.json'] {
+  errno: -4058,
+  code: 'ENOENT',
+  syscall: 'open',
+  path: 'E:\\PAARA-main-pg-migration\\app-config.json'
+}
+[debug] [2026-09-09T20:12:35.906Z] : >>>> HTTP REQUEST : GET https://api.catalyst.zoho.in/baas/get-details 
+Query params: {"feature_name":"runtime"}
+
+[debug] [2026-09-09T20:12:36.043Z] : <<<< HTTP RESPONSE : 200
+Response Headers: {"server":"ZGS","date":"Wed, 09 Sep 2026 20:12:35 GMT","content-type":"application/vnd.catalyst.v2+json","transfer-encoding":"chunked","connection":"keep-alive","x-content-type-options":"nosniff","cache-control":"private,no-cache,no-store,max-age=0,must-revalidate","pragma":"no-cache","expires":"Thu, 01 Jan 1970 00:00:00 GMT","x-frame-options":"DENY","strict-transport-security":"max-age=64072000; includeSubDomains; preload"}
+
