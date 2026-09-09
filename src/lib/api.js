@@ -9,9 +9,7 @@ const resolveBaseUrl = () => {
     if (host === "localhost" || host === "127.0.0.1") {
       return "http://localhost:4000/api";
     }
-    if (host.includes("paarajewellery.in") || host.includes("paara.vercel.app") || host.includes("www.paarajewellery.in")) {
-      return "https://paara-backend.vercel.app/api";
-    }
+    return "/api";
   }
 
   return "https://paara-backend-50045676810.development.catalystappsail.in/api";
@@ -38,7 +36,10 @@ export const resolveAssetUrl = (value) => {
   }
   const assetPath = source.startsWith("/") ? source : `/${source}`;
   const encodedPath = encodeURI(assetPath).replace(/#/g, "%23");
-  return `${new URL(BASE_URL).origin}${encodedPath}`;
+  const assetOrigin = /^https?:\/\//i.test(BASE_URL)
+    ? new URL(BASE_URL).origin
+    : window.location.origin;
+  return `${assetOrigin}${encodedPath}`;
 };
 
 const normalizeResponseAssets = (value, key = "") => {

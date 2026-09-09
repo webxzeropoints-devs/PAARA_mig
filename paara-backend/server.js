@@ -8,7 +8,6 @@ if (missingEnvVars.length > 0) {
 }
 
 const express = require('express');
-const cors = require('cors');
 const rateLimit = require('express-rate-limit');
 const multer = require('multer');
 const path = require('path');
@@ -50,6 +49,7 @@ const buildAllowedOrigins = () => {
   const configuredOrigins = (process.env.FRONTEND_URL || '')
     .split(',')
     .map((value) => value.trim())
+    .map(normalizeOrigin)
     .filter(Boolean);
 
   const defaultOrigins = [
@@ -82,22 +82,33 @@ const isAllowedOrigin = (origin) => {
   return isLocalhost || isVercelPreview;
 };
 
-const corsOptions = {
-  origin(origin, callback) {
-    if (isAllowedOrigin(origin)) {
-      return callback(null, origin || true);
-    }
-    return callback(new Error('Not allowed by CORS'));
-  },
-  credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'x-admin-key', 'X-Requested-With'],
-  exposedHeaders: ['Content-Length', 'Content-Type'],
-  optionsSuccessStatus: 204
-};
+const corsMethods = 'GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS';
+const corsAllowedHeaders = 'Content-Type, Authorization, x-admin-key, X-Requested-With';
 
-app.use(cors(corsOptions));
-app.options('*', cors(corsOptions));
+// Handle CORS before any static middleware, request locks, parsers, or API routes.
+// This is explicit because AppSail may answer OPTIONS itself unless the request
+// reaches the application with the required headers already established.
+app.use((req, res, next) => {
+  const requestOrigin = req.get('Origin');
+  const normalizedOrigin = requestOrigin ? normalizeOrigin(requestOrigin) : null;
+
+  if (normalizedOrigin && isAllowedOrigin(normalizedOrigin)) {
+    res.setHeader('Access-Control-Allow-Origin', normalizedOrigin);
+    res.setHeader('Access-Control-Allow-Credentials', 'true');
+    res.setHeader('Access-Control-Allow-Methods', corsMethods);
+    res.setHeader('Access-Control-Allow-Headers', corsAllowedHeaders);
+    res.setHeader('Access-Control-Expose-Headers', 'Content-Length, Content-Type');
+    res.setHeader('Vary', 'Origin');
+  }
+
+  if (req.method === 'OPTIONS') {
+    return normalizedOrigin && isAllowedOrigin(normalizedOrigin)
+      ? res.sendStatus(204)
+      : res.sendStatus(403);
+  }
+
+  return next();
+});
 
 // Serve the shared public assets used by the storefront and local upload files.
 app.use('/images', express.static(path.join(__dirname, '..', 'public', 'images')));
