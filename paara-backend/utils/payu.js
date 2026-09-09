@@ -2,6 +2,8 @@ const crypto = require('crypto');
 
 const PAYU_TEST_PAYMENT_URL = 'https://test.payu.in/_payment';
 const PAYU_TEST_VERIFY_URL = 'https://test.payu.in/merchant/postservice.php?form=2';
+const PAYU_PRODUCTION_PAYMENT_URL = 'https://secure.payu.in/_payment';
+const PAYU_PRODUCTION_VERIFY_URL = 'https://secure.payu.in/merchant/postservice.php?form=2';
 
 const getPayuConfig = () => {
   const key = String(process.env.PAYU_MERCHANT_KEY || '').trim();
@@ -10,14 +12,28 @@ const getPayuConfig = () => {
   const successUrl = String(process.env.PAYU_SUCCESS_URL || '').trim();
   const failureUrl = String(process.env.PAYU_FAILURE_URL || '').trim();
 
-  if (!key || !salt || !successUrl || !failureUrl) {
-    throw new Error('PayU is not configured.');
+  if (!key) throw new Error('PAYU_MERCHANT_KEY is not configured.');
+  if (!salt) throw new Error('PAYU_MERCHANT_SALT is not configured.');
+  if (!['test', 'production'].includes(environment)) {
+    throw new Error('PAYU_ENV must be either "test" or "production".');
   }
-  if (environment !== 'test') {
-    throw new Error('Only the PayU test environment is enabled.');
+  for (const [name, value] of [['PAYU_SUCCESS_URL', successUrl], ['PAYU_FAILURE_URL', failureUrl]]) {
+    let parsed;
+    try { parsed = new URL(value); } catch { parsed = null; }
+    if (!parsed || parsed.protocol !== 'https:') {
+      throw new Error(`${name} must be a valid HTTPS URL.`);
+    }
   }
 
-  return { key, salt, successUrl, failureUrl };
+  return {
+    key,
+    salt,
+    environment,
+    successUrl,
+    failureUrl,
+    paymentUrl: environment === 'production' ? PAYU_PRODUCTION_PAYMENT_URL : PAYU_TEST_PAYMENT_URL,
+    verifyUrl: environment === 'production' ? PAYU_PRODUCTION_VERIFY_URL : PAYU_TEST_VERIFY_URL,
+  };
 };
 
 const sha512 = (value) => crypto.createHash('sha512').update(value, 'utf8').digest('hex');
@@ -96,7 +112,7 @@ const createCheckout = ({ order, customer, txnid: existingTxnid }) => {
     order_number: order.order_number || order.id,
     amount,
     currency: 'INR',
-    action: PAYU_TEST_PAYMENT_URL,
+    action: config.paymentUrl,
     method: 'POST',
     fields,
     txnid,
@@ -111,7 +127,7 @@ const verifyPayment = async (txnid) => {
     var1: txnid,
     hash: generateVerifyHash({ key: config.key, command: 'verify_payment', txnid }, config.salt),
   });
-  const response = await fetch(PAYU_TEST_VERIFY_URL, {
+  const response = await fetch(config.verifyUrl, {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body,
@@ -123,6 +139,8 @@ const verifyPayment = async (txnid) => {
 module.exports = {
   PAYU_TEST_PAYMENT_URL,
   PAYU_TEST_VERIFY_URL,
+  PAYU_PRODUCTION_PAYMENT_URL,
+  PAYU_PRODUCTION_VERIFY_URL,
   getPayuConfig,
   generateRequestHash,
   generateVerifyHash,

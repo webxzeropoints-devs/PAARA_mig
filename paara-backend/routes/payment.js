@@ -165,9 +165,10 @@ async function processPayuCallback(payload, expectedStatus) {
 }
 
 router.get('/config', requireAuth, (req, res) => {
+  const config = getPayuConfig();
   res.json({
     provider: 'payu',
-    environment: 'test',
+    environment: config.environment,
     payment_methods: ['payu'],
     hosted_checkout: true,
   });
