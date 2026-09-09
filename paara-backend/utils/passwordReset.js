@@ -44,11 +44,19 @@ async function issuePasswordResetOtp(email, userType = 'customer') {
     ? `Your Paara admin password reset code is ${code}. This code expires in 10 minutes.`
     : `Your Paara password reset code is ${code}. This code expires in 10 minutes.`;
 
-  await sendEmail({
-    to: normalizedEmail,
-    subject,
-    text: `${replyText}\n\nIf you did not request this, you can ignore this email.`
-  });
+  try {
+    await sendEmail({
+      to: normalizedEmail,
+      subject,
+      text: `${replyText}\n\nIf you did not request this, you can ignore this email.`
+    });
+  } catch (error) {
+    await db.query(
+      'DELETE FROM password_reset_otps WHERE email = $1 AND user_type = $2 AND code = $3',
+      [normalizedEmail, userType, hashResetCode(code)]
+    );
+    throw error;
+  }
 
   return {
     email: normalizedEmail,

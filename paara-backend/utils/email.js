@@ -3,7 +3,7 @@ const { maskSensitiveText } = require('./validate');
 
 const smtpConfig = {
   user: String(process.env.SMTP_USER || process.env.EMAIL_USER || '').trim(),
-  pass: String(process.env.SMTP_PASS || process.env.EMAIL_PASSWORD || '').trim(),
+  pass: String(process.env.SMTP_PASSWORD || process.env.SMTP_PASS || process.env.EMAIL_PASSWORD || '').trim(),
   host: String(process.env.SMTP_HOST || process.env.EMAIL_HOST || '').trim(),
   port: Number(String(process.env.SMTP_PORT || process.env.EMAIL_PORT || '587').trim()),
   from: String(process.env.SMTP_FROM || process.env.EMAIL_FROM || process.env.EMAIL_USER || '').trim(),
@@ -46,4 +46,16 @@ async function trySendEmail(options, context) {
   }
 }
 
-module.exports = { sendEmail, trySendEmail };
+function getEmailConfigurationStatus() {
+  return {
+    configured: Boolean(smtpConfig.host && smtpConfig.user && smtpConfig.pass),
+    hostConfigured: Boolean(smtpConfig.host),
+    portConfigured: Number.isInteger(smtpConfig.port) && smtpConfig.port > 0,
+    userConfigured: Boolean(smtpConfig.user),
+    passwordConfigured: Boolean(smtpConfig.pass),
+    fromConfigured: Boolean(smtpConfig.from),
+    secure: smtpConfig.port === 465,
+  };
+}
+
+module.exports = { sendEmail, trySendEmail, getEmailConfigurationStatus };

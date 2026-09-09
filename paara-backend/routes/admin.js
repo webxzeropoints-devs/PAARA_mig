@@ -5,6 +5,7 @@ const { processLoyaltyOrder } = require('../services/loyalty');
 const path = require('path');
 const fs = require('fs');
 const publicImageUrl = require('../utils/publicImageUrl');
+const { getEmailConfigurationStatus } = require('../utils/email');
 
 const router = express.Router();
 
@@ -181,6 +182,11 @@ router.get('/products', async (q, s) => {
     console.error('[ADMIN_PRODUCTS_FAILED]', error.message);
     return s.status(500).json({ error: 'Could not load products.' });
   }
+});
+
+// Safe operational diagnostic: values and credentials are never returned.
+router.get('/email-status', (q, s) => {
+  s.json(getEmailConfigurationStatus());
 });
 
 router.get('/categories', async (q, s) => {

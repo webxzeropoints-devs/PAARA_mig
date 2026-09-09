@@ -38,9 +38,13 @@ async function issueEmailOtp(email, context) {
     to: normalizedEmail,
     subject: 'Your Paara verification code',
     text: `Your Paara verification code is ${code}. It expires in 10 minutes.`,
-  }, context || `OTP to ${normalizedEmail}`);
+  }, context || 'email OTP');
 
   if (!result.success) {
+    await db.query(
+      'UPDATE email_otps SET verified = TRUE WHERE email = $1 AND code = $2 AND verified = FALSE',
+      [normalizedEmail, hashOtp(code)]
+    );
     throw result.error || new Error('Verification email could not be sent.');
   }
 
