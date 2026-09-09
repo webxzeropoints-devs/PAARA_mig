@@ -24,10 +24,10 @@ function getCatalystApp() {
 }
 
 async function getFolder() {
-  const folderId = String(process.env.CATALYST_MEDIA_FOLDER_ID || '').trim();
+  const folderId = String(process.env.PAARA_MEDIA_FOLDER_ID || '').trim();
   if (!folderId) {
     const error = new Error(
-      'Catalyst File Store is not configured. Set CATALYST_MEDIA_FOLDER_ID for the media folder.'
+      'Catalyst File Store is not configured. Set PAARA_MEDIA_FOLDER_ID for the media folder.'
     );
     error.code = 'MEDIA_STORAGE_NOT_CONFIGURED';
     throw error;
