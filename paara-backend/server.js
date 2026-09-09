@@ -290,7 +290,14 @@ app.get('/api/health', (req, res) => res.json({ ok: true }));
 
 // Central error handler
 app.use((err, req, res, next) => {
-  console.error('[REQUEST_ERROR]', { message: maskSensitiveText(err.message), name: err.name, method: req.method, path: req.path });
+  console.error('[REQUEST_ERROR]', {
+    message: maskSensitiveText(err.message),
+    name: err.name,
+    code: err.code,
+    meta: err.meta,
+    method: req.method,
+    path: req.path,
+  });
   if (err?.name === 'MulterError') {
     const message = err.code === 'LIMIT_FIELD_VALUE'
       ? 'The submitted image data is too large. Choose the image file again and retry.'
@@ -298,6 +305,21 @@ app.use((err, req, res, next) => {
         ? 'The image is too large. Please choose an image under 5 MB.'
         : 'The image upload request is invalid. Please try again.';
     return res.status(400).json({ ok: false, code: err.code, message });
+  }
+  if (req.path.startsWith('/api/admin')) {
+    console.error('[ADMIN_CRUD_ERROR]', {
+      message: maskSensitiveText(err.message),
+      name: err.name,
+      code: err.code,
+      meta: err.meta,
+      method: req.method,
+      path: req.path,
+    });
+    return res.status(500).json({
+      ok: false,
+      code: err.code || 'ADMIN_CRUD_ERROR',
+      error: err.message || 'Admin operation failed.',
+    });
   }
   if (err?.type === 'entity.parse.failed' || (err instanceof SyntaxError && err.status === 400 && err.body !== undefined)) {
     return res.status(400).json({ ok: false, code: 'INVALID_REQUEST_BODY', message: 'The request body is invalid. Please try again.' });

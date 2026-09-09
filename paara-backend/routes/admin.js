@@ -32,6 +32,7 @@ const cleanImages = (images) => (Array.isArray(images)
 const safeUploadError = (error) => ({
   message: error?.message || 'Image storage failed.',
   code: error?.code || 'MEDIA_STORAGE_FAILED',
+  meta: error?.meta,
 });
 
 const deleteIfUnreferenced = async (references) => {
@@ -572,7 +573,7 @@ router.post('/products', async (q, s) => {
       uploadedImages = await saveUploadedImages(filesArray);
     } catch (imgErr) {
       const uploadError = safeUploadError(imgErr);
-      console.error('Image upload failed:', uploadError);
+      console.error('[ADMIN_UPLOAD_ERROR]', uploadError);
 
       return s.status(400).json({
         error: `Could not store uploaded images: ${uploadError.message}`,
@@ -643,7 +644,7 @@ router.post('/products', async (q, s) => {
     return s.status(201).json(decorated[0]);
   } catch (err) {
     const productError = safeUploadError(err);
-    console.error('Product creation failed:', productError);
+    console.error('[ADMIN_CRUD_ERROR]', productError);
 
     return s.status(400).json({
       error: `Could not create the product: ${productError.message}`,
@@ -836,7 +837,7 @@ router.put('/products/:id', async (q, s) => {
     return s.json(decorated[0]);
   } catch (err) {
     const productError = safeUploadError(err);
-    console.error('Product update failed:', productError);
+    console.error('[ADMIN_CRUD_ERROR]', productError);
 
     return s.status(400).json({
       error: `Could not update the product: ${productError.message}`,
@@ -2149,7 +2150,6 @@ router.post('/orders/:id/grant-gift-card', async (q, s) => {
 });
 module.exports = router;
 module.exports.normalizeFormBoolean = normalizeFormBoolean;
-
 
 
 
