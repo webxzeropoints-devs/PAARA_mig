@@ -7,17 +7,39 @@ const smtpConfig = {
   host: String(process.env.SMTP_HOST || process.env.EMAIL_HOST || '').trim(),
   port: Number(String(process.env.SMTP_PORT || process.env.EMAIL_PORT || '587').trim()),
   from: String(process.env.SMTP_FROM || process.env.EMAIL_FROM || process.env.EMAIL_USER || '').trim(),
+  secure: String(process.env.SMTP_SECURE || '').trim().toLowerCase() === 'true'
+    || Number(String(process.env.SMTP_PORT || process.env.EMAIL_PORT || '587').trim()) === 465,
+  rejectUnauthorized: String(process.env.SMTP_TLS_REJECT_UNAUTHORIZED || 'true').trim().toLowerCase() !== 'false',
 };
 
-const transporter = nodemailer.createTransport({
-  host: smtpConfig.host,
-  port: smtpConfig.port,
-  secure: smtpConfig.port === 465,
-  auth: { user: smtpConfig.user, pass: smtpConfig.pass },
-  connectionTimeout: 10000,
-  greetingTimeout: 10000,
-  socketTimeout: 15000,
-});
+function getTransportOptions() {
+  return {
+    host: smtpConfig.host,
+    port: smtpConfig.port,
+    secure: smtpConfig.secure,
+    pool: false,
+    auth: { user: smtpConfig.user, pass: smtpConfig.pass },
+    tls: { rejectUnauthorized: smtpConfig.rejectUnauthorized },
+    connectionTimeout: 10000,
+    greetingTimeout: 10000,
+    socketTimeout: 15000,
+  };
+}
+
+function logTransportConfig(context) {
+  console.info('[EMAIL_TRANSPORT_CONFIG]', {
+    context: maskSensitiveText(context),
+    host: smtpConfig.host || '[missing]',
+    port: smtpConfig.port,
+    secure: smtpConfig.secure,
+    tlsRejectUnauthorized: smtpConfig.rejectUnauthorized,
+    userConfigured: Boolean(smtpConfig.user),
+    passwordConfigured: Boolean(smtpConfig.pass),
+    fromConfigured: Boolean(smtpConfig.from),
+  });
+}
+
+logTransportConfig('module-load');
 
 async function sendEmail({ to, subject, text, attachments = [] }) {
   if (!smtpConfig.user || !smtpConfig.pass || !smtpConfig.host) {
@@ -25,7 +47,13 @@ async function sendEmail({ to, subject, text, attachments = [] }) {
     error.code = 'EMAIL_NOT_CONFIGURED';
     throw error;
   }
-  console.info('[EMAIL_SEND_START]', { recipient: maskSensitiveText(to), subject: maskSensitiveText(subject) });
+  logTransportConfig('send');
+  const transporter = nodemailer.createTransport(getTransportOptions());
+  console.info('[EMAIL_SEND_START]', {
+    recipient: maskSensitiveText(to),
+    subject: maskSensitiveText(subject),
+    pool: false,
+  });
   return transporter.sendMail({
     from: smtpConfig.from || smtpConfig.user,
     to,
@@ -41,7 +69,18 @@ async function trySendEmail(options, context) {
     console.log('[EMAIL_SEND_SUCCESS]', { context: maskSensitiveText(context), messageId: result.messageId });
     return { success: true, result };
   } catch (error) {
-    console.error('[EMAIL_SEND_FAILED]', { context: maskSensitiveText(context), message: maskSensitiveText(error.message), name: error.name, code: error.code });
+    console.error('[EMAIL_SEND_FAILED]', {
+      context: maskSensitiveText(context),
+      message: maskSensitiveText(error.message),
+      name: error.name,
+      code: error.code,
+      command: error.command,
+      responseCode: error.responseCode,
+      errno: error.errno,
+      syscall: error.syscall,
+      address: error.address,
+      port: error.port,
+    });
     return { success: false, error };
   }
 }
@@ -54,7 +93,8 @@ function getEmailConfigurationStatus() {
     userConfigured: Boolean(smtpConfig.user),
     passwordConfigured: Boolean(smtpConfig.pass),
     fromConfigured: Boolean(smtpConfig.from),
-    secure: smtpConfig.port === 465,
+    secure: smtpConfig.secure,
+    tlsRejectUnauthorized: smtpConfig.rejectUnauthorized,
   };
 }
 
