@@ -696,7 +696,7 @@ router.post('/products', async (q, s) => {
       normalizedIsBestseller,
       normalizedIsActive,
       normalizedIsVault,
-      release_date || new Date().toISOString(),
+      release_date || new Date().toISOString().replace('T', ' ').replace(/\.\d{3}Z$/, ''),
     ]);
 
     const product = result.rows[0];
