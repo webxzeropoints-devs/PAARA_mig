@@ -251,14 +251,30 @@ async function processPayuCallback(payload, expectedStatus) {
   const reference = String(details.mihpayid || payload.mihpayid || txnid);
   const newlyPaid = await markOrderPaid(order.id, reference);
   if (newlyPaid) {
-    const loyalty = await processLoyaltyOrder(order.id, order.customer_id);
-    sendPaidInvoice(order.id).catch((error) => {
+    const loyalty = await processLoyaltyOrder(
+      order.id,
+      order.customer_id
+    );
+  
+    try {
+      await sendPaidInvoice(order.id);
+      console.log('[ORDER_CONFIRMATION_EMAIL_SENT]', {
+        orderId: order.id,
+      });
+    } catch (error) {
       console.error('[INVOICE_EMAIL_FAILED]', {
+        orderId: order.id,
         message: maskSensitiveText(error.message),
         name: error.name,
       });
-    });
-    return { orderId: order.id, paid: true, newlyPaid: true, loyalty };
+    }
+  
+    return {
+      orderId: order.id,
+      paid: true,
+      newlyPaid: true,
+      loyalty,
+    };
   }
   return { orderId: order.id, paid: true, newlyPaid: false };
 }
