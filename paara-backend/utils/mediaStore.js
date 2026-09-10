@@ -24,7 +24,8 @@ function getCatalystApp(req) {
       throw error;
     }
 
-    return catalyst.initialize(req, { scope: 'admin' });
+    // AppSail: initialize the Catalyst SDK with the Express request.
+    return catalyst.initialize(req);
   } catch (error) {
     error.code = error.code || 'MEDIA_STORAGE_NOT_CONFIGURED';
     throw error;
@@ -71,11 +72,9 @@ function validateImage(file) {
     throw error;
   }
 
-  if (
-    !ALLOWED_IMAGE_TYPES.has(
-      String(file.mimetype || '').toLowerCase()
-    )
-  ) {
+  if (!ALLOWED_IMAGE_TYPES.has(
+    String(file.mimetype || '').toLowerCase()
+  )) {
     const error = new Error(
       'Only JPEG, PNG, GIF, WebP, AVIF, or SVG images are allowed.'
     );
@@ -84,9 +83,7 @@ function validateImage(file) {
   }
 
   if (file.buffer.length > MAX_IMAGE_BYTES) {
-    const error = new Error(
-      'Images must be 5 MB or smaller.'
-    );
+    const error = new Error('Images must be 5 MB or smaller.');
     error.code = 'IMAGE_TOO_LARGE';
     throw error;
   }
