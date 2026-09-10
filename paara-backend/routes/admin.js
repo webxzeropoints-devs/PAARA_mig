@@ -1292,11 +1292,27 @@ router.get('/paara-story', async (q, s) => {
       description: '',
     });
   } catch (error) {
-    console.error('[ADMIN_PAARA_STORY_GET_FAILED]', error.message);
-    return s.status(500).json({
-      error: 'Could not load Paara Story.',
+  if (error.code === '42P01') {
+    console.warn(
+      '[PAARA_STORY_TABLE_MISSING] Serving default story content.'
+    );
+
+    return s.json({
+      id: 1,
+      title: 'A dream shaped by fashion. A brand built with purpose.',
+      description: '',
     });
   }
+
+  console.error(
+    '[ADMIN_PAARA_STORY_GET_FAILED]',
+    error.message
+  );
+
+  return s.status(500).json({
+    error: 'Could not load Paara Story.',
+  });
+}
 });
 
 router.put('/paara-story', async (q, s) => {
