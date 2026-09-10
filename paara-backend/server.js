@@ -325,48 +325,66 @@ app.get('/api/db-status', requireAdminSession, (req, res) => {
 
 app.get('/api/health', (req, res) => res.json({ ok: true }));
 
-// TEMPORARY: Test direct Catalyst File Store upload
-app.get('/api/diagnostics/media-v2', async (req, res) => {
-  const folderId = String(
-    process.env.PAARA_MEDIA_FOLDER_ID || ''
+// TEMPORARY: Test direct Catalyst Stratus upload
+app.get('/api/diagnostics/stratus', requireAdminSession, async (req, res) => {
+  const bucketName = String(
+    process.env.PAARA_STRATUS_BUCKET || ''
   ).trim();
 
   const tempPath = path.join(
     os.tmpdir(),
-    `paara-diagnostic-${crypto.randomUUID()}.txt`
+    `paara-stratus-diagnostic-${crypto.randomUUID()}.txt`
   );
 
   try {
+    if (!bucketName) {
+      return res.status(503).json({
+        ok: false,
+        code: 'MEDIA_STORAGE_NOT_CONFIGURED',
+        message: 'PAARA_STRATUS_BUCKET is not configured.',
+      });
+    }
+
     const catalyst = require('zcatalyst-sdk-node');
     const catalystApp = catalyst.initialize(req);
 
-    const filestore = catalystApp.filestore();
-    const folder = filestore.folder(folderId);
+    const bucket = catalystApp
+      .stratus()
+      .bucket(bucketName);
+
+    const objectKey =
+      `diagnostics/paara-test-${Date.now()}-${crypto.randomUUID()}.txt`;
 
     await fs.promises.writeFile(
       tempPath,
-      `Paara File Store diagnostic ${new Date().toISOString()}`
+      `Paara Stratus diagnostic ${new Date().toISOString()}`
     );
 
-    const details = await folder.uploadFile({
-      code: fs.createReadStream(tempPath),
-      name: `paara-diagnostic-${Date.now()}.txt`,
-    });
+    const uploadResult = await bucket.putObject(
+      objectKey,
+      fs.createReadStream(tempPath),
+      {
+        contentType: 'text/plain',
+        overwrite: false,
+      }
+    );
 
-    console.log('[MEDIA_DIAGNOSTIC_UPLOAD_SUCCESS]', {
-      folderId,
-      details,
+    console.log('[STRATUS_DIAGNOSTIC_UPLOAD_SUCCESS]', {
+      bucketName,
+      objectKey,
+      uploadResult,
     });
 
     return res.json({
       ok: true,
-      folderId,
-      message: 'AppSail successfully uploaded a file to Catalyst File Store.',
-      details,
+      bucketName,
+      objectKey,
+      reference: `stratus:${objectKey}`,
+      uploadResult,
     });
   } catch (error) {
-    console.error('[MEDIA_DIAGNOSTIC_UPLOAD_FAILED]', {
-      folderId,
+    console.error('[STRATUS_DIAGNOSTIC_UPLOAD_FAILED]', {
+      bucketName,
       message: error?.message,
       code: error?.code,
       status: error?.status,
@@ -376,19 +394,20 @@ app.get('/api/diagnostics/media-v2', async (req, res) => {
 
     return res.status(500).json({
       ok: false,
-      folderId,
+      bucketName,
       message: error?.message,
       code: error?.code,
+      status: error?.status,
+      statusCode: error?.statusCode,
     });
   } finally {
     try {
       await fs.promises.unlink(tempPath);
     } catch {
-      // Ignore cleanup failures.
+      // Ignore temporary-file cleanup failures.
     }
   }
 });
-
 // Central error handler
 app.use((err, req, res, next) => {
   console.error('[REQUEST_ERROR]', {
