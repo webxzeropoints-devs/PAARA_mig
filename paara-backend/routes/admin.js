@@ -36,7 +36,7 @@ const safeUploadError = (error) => ({
   meta: error?.meta,
 });
 
-const deleteIfUnreferenced = async (references) => {
+const deleteIfUnreferenced = async (references, req) => {
   for (const reference of new Set(references.filter(mediaStore.isCatalystReference))) {
     const result = await db.query(`
       SELECT 1 FROM product_images WHERE image_url = $1
@@ -46,7 +46,7 @@ const deleteIfUnreferenced = async (references) => {
       UNION ALL SELECT 1 FROM admins WHERE profile_image_url = $1
       LIMIT 1
     `, [reference]);
-    if (result.rowCount === 0) await mediaStore.deleteReference(reference);
+    if (result.rowCount === 0) await mediaStore.deleteReference(reference, req);
   }
 };
 
@@ -140,9 +140,9 @@ const saveUploadedImages = async (files, req) => {
 };
 
 
-const saveUploadedImage = async (file, prefix) => {
+const saveUploadedImage = async (file, prefix, req) => {
   if (!file) return null;
-  const uploaded = await mediaStore.uploadImage(file, prefix);
+  const uploaded = await mediaStore.uploadImage(file, prefix, req);
   return uploaded.reference;
 };
 
@@ -744,7 +744,11 @@ router.put('/products/:id', async (q, s) => {
 
     if (uploadedImages.length > 0 || hasExistingImages) {
       await writeImages(q.params.id, allImages);
-      await deleteIfUnreferenced(previousImages.rows.map((row) => row.image_url)
+      await deleteIfUnreferenced(
+        previousImages.rows.map((row) => row.image_url)
+          .filter((image) => !allImages.includes(image)),
+        q
+      );
         .filter((image) => !allImages.includes(image)));
     }
 
@@ -921,7 +925,10 @@ router.delete('/products/:id', async (q, s) => {
       });
     }
 
-    await deleteIfUnreferenced(images.rows.map((row) => row.image_url));
+    await deleteIfUnreferenced(
+      images.rows.map((row) => row.image_url),
+      q
+    );
     return s.json({ success: true });
   } catch (error) {
     console.error('[ADMIN_PRODUCT_DELETE_FAILED]', error.message);
@@ -1127,7 +1134,8 @@ router.put('/paara-irl', async (q, s) => {
           file,
           uploadSlots[index] === 'owner'
             ? 'owner'
-            : 'paara-irl'
+            : 'paara-irl',
+          q
         )
       )
     );
@@ -1209,10 +1217,17 @@ router.put('/paara-irl', async (q, s) => {
     );
 
     const row = result.rows[0];
-    await deleteIfUnreferenced([
-      previousImages.image_url,
-      previousImages.owner_image_url,
-    ].filter((image) => image && ![nextImageUrl, nextOwnerImageUrl].includes(image)));
+    await deleteIfUnreferenced(
+      [
+        previousImages.image_url,
+        previousImages.owner_image_url,
+      ].filter(
+        (image) =>
+          image &&
+          ![nextImageUrl, nextOwnerImageUrl].includes(image)
+      ),
+      q
+    );
 
     return s.json({
       ...row,
@@ -1379,7 +1394,9 @@ router.put('/worn-by-you', async (q, s) => {
     );
 
     const uploadedImages = await Promise.all(
-      files.map((file) => saveUploadedImage(file, 'worn-by-you'))
+      files.map((file) =>
+        saveUploadedImage(file, 'worn-by-you', q)
+      )
     );
 
     const uploadedBySlot = Object.fromEntries(
@@ -1477,8 +1494,17 @@ router.put('/worn-by-you', async (q, s) => {
       await client.query('COMMIT');
       await deleteIfUnreferenced(
         [...previousImages.entries()]
-          .filter(([id, image]) => image && !saved.some((row) => Number(row.id) === id && row.image_url === image))
-          .map(([, image]) => image)
+          .filter(
+            ([id, image]) =>
+              image &&
+              !saved.some(
+                (row) =>
+                  Number(row.id) === id &&
+                  row.image_url === image
+              )
+          )
+          .map(([, image]) => image),
+        q
       );
 
       return s.json({
@@ -1536,7 +1562,10 @@ router.delete('/worn-by-you/:id', async (q, s) => {
       });
     }
 
-    await deleteIfUnreferenced(existing.rows.map((row) => row.image_url));
+    await deleteIfUnreferenced(
+      existing.rows.map((row) => row.image_url),
+      q
+    );
     return s.json({
       success: true,
       id: Number(q.params.id),
