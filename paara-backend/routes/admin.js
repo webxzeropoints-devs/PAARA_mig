@@ -744,12 +744,13 @@ router.put('/products/:id', async (q, s) => {
 
     if (uploadedImages.length > 0 || hasExistingImages) {
       await writeImages(q.params.id, allImages);
+    
       await deleteIfUnreferenced(
-        previousImages.rows.map((row) => row.image_url)
+        previousImages.rows
+          .map((row) => row.image_url)
           .filter((image) => !allImages.includes(image)),
         q
       );
-        .filter((image) => !allImages.includes(image)));
     }
 
     delete updates.existingImages;
