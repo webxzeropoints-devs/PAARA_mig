@@ -1,18 +1,31 @@
 const nodemailer = require('nodemailer');
 const { maskSensitiveText } = require('./validate');
 
-const smtpConfig = {
-  user: String(process.env.SMTP_USER || process.env.EMAIL_USER || '').trim(),
-  pass: String(process.env.SMTP_PASSWORD || process.env.SMTP_PASS || process.env.EMAIL_PASSWORD || '').trim(),
-  host: String(process.env.SMTP_HOST || process.env.EMAIL_HOST || '').trim(),
-  port: Number(String(process.env.SMTP_PORT || process.env.EMAIL_PORT || '587').trim()),
-  from: String(process.env.SMTP_FROM || process.env.EMAIL_FROM || process.env.EMAIL_USER || '').trim(),
-  secure: String(process.env.SMTP_SECURE || '').trim().toLowerCase() === 'true'
-    || Number(String(process.env.SMTP_PORT || process.env.EMAIL_PORT || '587').trim()) === 465,
-  rejectUnauthorized: String(process.env.SMTP_TLS_REJECT_UNAUTHORIZED || 'true').trim().toLowerCase() !== 'false',
-};
+function readSmtpConfig() {
+  const port = Number(String(process.env.SMTP_PORT || process.env.EMAIL_PORT || '587').trim());
+  const secureSetting = String(process.env.SMTP_SECURE || '').trim().toLowerCase();
+  if (!Number.isInteger(port) || port < 1 || port > 65535) {
+    const error = new Error('SMTP_PORT must be a valid TCP port.');
+    error.code = 'SMTP_INVALID_PORT';
+    throw error;
+  }
+  if ((port === 465 && secureSetting === 'false') || ([25, 587].includes(port) && secureSetting === 'true')) {
+    const error = new Error(`SMTP_SECURE is incompatible with SMTP_PORT ${port}.`);
+    error.code = 'SMTP_SECURITY_MISMATCH';
+    throw error;
+  }
+  return {
+    user: String(process.env.SMTP_USER || process.env.EMAIL_USER || '').trim(),
+    pass: String(process.env.SMTP_PASS || process.env.SMTP_PASSWORD || process.env.EMAIL_PASSWORD || '').trim(),
+    host: String(process.env.SMTP_HOST || process.env.EMAIL_HOST || '').trim(),
+    port,
+    from: String(process.env.SMTP_FROM || process.env.EMAIL_FROM || process.env.EMAIL_USER || '').trim(),
+    secure: port === 465 || (secureSetting === 'true' && ![25, 587].includes(port)),
+    rejectUnauthorized: String(process.env.SMTP_TLS_REJECT_UNAUTHORIZED || 'true').trim().toLowerCase() !== 'false',
+  };
+}
 
-function getTransportOptions() {
+function getTransportOptions(smtpConfig) {
   return {
     host: smtpConfig.host,
     port: smtpConfig.port,
@@ -27,6 +40,7 @@ function getTransportOptions() {
 }
 
 function logTransportConfig(context) {
+  const smtpConfig = readSmtpConfig();
   console.info('[EMAIL_TRANSPORT_CONFIG]', {
     context: maskSensitiveText(context),
     host: smtpConfig.host || '[missing]',
@@ -39,16 +53,15 @@ function logTransportConfig(context) {
   });
 }
 
-logTransportConfig('module-load');
-
 async function sendEmail({ to, subject, text, attachments = [] }) {
+  const smtpConfig = readSmtpConfig();
   if (!smtpConfig.user || !smtpConfig.pass || !smtpConfig.host) {
     const error = new Error('Email service is not configured.');
     error.code = 'EMAIL_NOT_CONFIGURED';
     throw error;
   }
   logTransportConfig('send');
-  const transporter = nodemailer.createTransport(getTransportOptions());
+  const transporter = nodemailer.createTransport(getTransportOptions(smtpConfig));
   console.info('[EMAIL_SEND_START]', {
     recipient: maskSensitiveText(to),
     subject: maskSensitiveText(subject),
@@ -86,6 +99,12 @@ async function trySendEmail(options, context) {
 }
 
 function getEmailConfigurationStatus() {
+  let smtpConfig;
+  try {
+    smtpConfig = readSmtpConfig();
+  } catch (error) {
+    return { configured: false, errorCode: error.code };
+  }
   return {
     configured: Boolean(smtpConfig.host && smtpConfig.user && smtpConfig.pass),
     hostConfigured: Boolean(smtpConfig.host),
