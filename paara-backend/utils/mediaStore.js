@@ -117,15 +117,26 @@ function toStorageReference(value) {
     return image;
   }
 
-  // Preserve existing legacy references.
+  // Preserve existing legacy Catalyst File Store references.
   if (/^catalyst-file:[^/]+$/i.test(image)) {
     return image;
   }
 
-  // Preserve existing relative/legacy image URLs.
+  // Convert our public Stratus media URL back to the canonical
+  // database reference when an existing image is submitted again.
+  if (image.startsWith('/media/')) {
+    const objectKey = image.slice('/media/'.length);
+
+    if (!objectKey || objectKey.includes('..')) {
+      return image;
+    }
+
+    return `stratus:${objectKey}`;
+  }
+
+  // Preserve other legacy/relative image URLs.
   return image;
 }
-
 async function uploadImage(file, prefix = 'image', req) {
   validateImage(file);
 
