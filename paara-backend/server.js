@@ -116,21 +116,52 @@ app.use((req, res, next) => {
 
 // Serve the shared public assets used by the storefront and local upload files.
 app.use('/images', express.static(path.join(__dirname, '..', 'public', 'images')));
-app.get('/media/:fileId', async (req, res) => {
-  const fileId = String(req.params.fileId || '').trim();
-  if (!/^[A-Za-z0-9_-]+$/.test(fileId)) return res.status(404).end();
+app.get('/media/*', async (req, res) => {
+  const mediaPath = String(req.params[0] || '').trim();
+
+  if (!mediaPath) {
+    return res.status(404).end();
+  }
+
   try {
+    const decodedPath = decodeURIComponent(mediaPath);
+
+    // Prevent path traversal.
+    if (
+      !decodedPath ||
+      decodedPath.includes('..') ||
+      decodedPath.includes('\\')
+    ) {
+      return res.status(404).end();
+    }
+
     const media = await mediaStore.download(
-      `catalyst-file:${fileId}`,
+      `stratus:${decodedPath}`,
       req
     );
-    if (!media) return res.status(404).end();
+
+    if (!media) {
+      return res.status(404).end();
+    }
+
     res.set('Content-Type', media.contentType);
     res.set('Content-Length', String(media.buffer.length));
+
     return res.end(media.buffer);
   } catch (error) {
-    console.error('[MEDIA_DOWNLOAD_FAILED]', { fileId, message: error.message, code: error.code });
-    return res.status(error.code === 'MEDIA_STORAGE_NOT_CONFIGURED' ? 503 : 404).end();
+    console.error('[MEDIA_DOWNLOAD_FAILED]', {
+      mediaPath,
+      message: error?.message,
+      code: error?.code,
+    });
+
+    return res
+      .status(
+        error?.code === 'MEDIA_STORAGE_NOT_CONFIGURED'
+          ? 503
+          : 404
+      )
+      .end();
   }
 });
 app.get('/images/blob/*', async (req, res) => {
