@@ -20,13 +20,12 @@ function getCatalystApp(req) {
 
     if (!req) {
       const error = new Error(
-        'Catalyst request context is required for File Store operations.'
+        'Catalyst request context is required for Stratus operations.'
       );
       error.code = 'MEDIA_STORAGE_NOT_CONFIGURED';
       throw error;
     }
 
-    // AppSail: initialize the Catalyst SDK with the Express request.
     return catalyst.initialize(req);
   } catch (error) {
     error.code = error.code || 'MEDIA_STORAGE_NOT_CONFIGURED';
@@ -34,14 +33,14 @@ function getCatalystApp(req) {
   }
 }
 
-async function getFolder(req) {
-  const folderId = String(
-    process.env.PAARA_MEDIA_FOLDER_ID || ''
+function getBucket(req) {
+  const bucketName = String(
+    process.env.PAARA_STRATUS_BUCKET || ''
   ).trim();
 
-  if (!folderId) {
+  if (!bucketName) {
     const error = new Error(
-      'Catalyst File Store is not configured. Set PAARA_MEDIA_FOLDER_ID for the media folder.'
+      'Catalyst Stratus is not configured. Set PAARA_STRATUS_BUCKET.'
     );
     error.code = 'MEDIA_STORAGE_NOT_CONFIGURED';
     throw error;
@@ -49,10 +48,12 @@ async function getFolder(req) {
 
   const catalystApp = getCatalystApp(req);
 
-  return catalystApp.filestore().folder(folderId);
+  return catalystApp
+    .stratus()
+    .bucket(bucketName);
 }
 
-function sanitizeName(value) {
+function sanitizeExtension(value) {
   const name = String(value || 'image').normalize('NFKC');
 
   const extension = name.includes('.')
@@ -74,9 +75,11 @@ function validateImage(file) {
     throw error;
   }
 
-  if (!ALLOWED_IMAGE_TYPES.has(
-    String(file.mimetype || '').toLowerCase()
-  )) {
+  if (
+    !ALLOWED_IMAGE_TYPES.has(
+      String(file.mimetype || '').toLowerCase()
+    )
+  ) {
     const error = new Error(
       'Only JPEG, PNG, GIF, WebP, AVIF, or SVG images are allowed.'
     );
@@ -91,8 +94,42 @@ function validateImage(file) {
   }
 }
 
+function isStratusReference(value) {
+  return /^stratus:/i.test(
+    String(value || '').trim()
+  );
+}
+
+function objectKeyFromReference(value) {
+  const reference = String(value || '').trim();
+
+  if (!isStratusReference(reference)) {
+    return null;
+  }
+
+  return reference.slice('stratus:'.length);
+}
+
+function toStorageReference(value) {
+  const image = String(value || '').trim();
+
+  if (isStratusReference(image)) {
+    return image;
+  }
+
+  // Preserve existing legacy references.
+  if (/^catalyst-file:[^/]+$/i.test(image)) {
+    return image;
+  }
+
+  // Preserve existing relative/legacy image URLs.
+  return image;
+}
+
 async function uploadImage(file, prefix = 'image', req) {
   validateImage(file);
+
+  const extension = sanitizeExtension(file.originalname);
 
   const filename =
     `${String(prefix)
@@ -100,82 +137,50 @@ async function uploadImage(file, prefix = 'image', req) {
       .slice(0, 32)}-` +
     `${Date.now()}-` +
     `${crypto.randomUUID()}` +
-    `${sanitizeName(file.originalname)}`;
-
-  const folder = await getFolder(req);
+    `${extension}`;
 
   /*
-   * Catalyst Node File Store expects the upload `code` to be
-   * a real filesystem ReadStream. Multer gives us the file in
-   * memory, so write it temporarily to /tmp and create a
-   * ReadStream from that file.
-   *
-   * AppSail instances provide writable temporary storage under
-   * the OS temp directory.
+   * Stratus does not allow certain special characters in object
+   * paths/names. Our generated filename contains only safe
+   * characters.
    */
+  const objectKey = `products/${filename}`;
+
+  const bucket = getBucket(req);
+
   const tempPath = path.join(
     os.tmpdir(),
-    `paara-${crypto.randomUUID()}${sanitizeName(file.originalname)}`
+    `paara-${crypto.randomUUID()}${extension}`
   );
 
   try {
-    await fs.promises.writeFile(tempPath, file.buffer);
+    await fs.promises.writeFile(
+      tempPath,
+      file.buffer
+    );
 
-    const details = await folder.uploadFile({
-      code: fs.createReadStream(tempPath),
-      name: filename,
-    });
-
-    const fileId = details?.id || details?.file_id;
-
-    if (!fileId) {
-      const error = new Error(
-        'Catalyst File Store did not return a file ID.'
-      );
-      error.code = 'MEDIA_UPLOAD_UNVERIFIED';
-      throw error;
-    }
+    const uploadResult = await bucket.putObject(
+      objectKey,
+      fs.createReadStream(tempPath),
+      {
+        contentType: file.mimetype,
+        overwrite: false,
+      }
+    );
 
     return {
-      reference: `catalyst-file:${fileId}`,
-      fileId: String(fileId),
+      reference: `stratus:${objectKey}`,
+      objectKey,
       contentType: file.mimetype,
+      uploadResult,
     };
   } finally {
     try {
       await fs.promises.unlink(tempPath);
     } catch {
-      // Ignore cleanup failures.
+      // Ignore temporary-file cleanup failures.
     }
   }
-}
-
-function isCatalystReference(value) {
-  return /^catalyst-file:[^/]+$/i.test(
-    String(value || '').trim()
-  );
-}
-
-function toStorageReference(value) {
-  const image = String(value || '').trim();
-
-  if (isCatalystReference(image)) {
-    return image;
-  }
-
-  const match = image.match(
-    /^\/media\/([A-Za-z0-9_-]+)$/i
-  );
-
-  return match
-    ? `catalyst-file:${decodeURIComponent(match[1])}`
-    : image;
-}
-
-function fileIdFromReference(value) {
-  return String(value || '')
-    .trim()
-    .slice('catalyst-file:'.length);
 }
 
 async function streamToBuffer(stream) {
@@ -188,7 +193,7 @@ async function streamToBuffer(stream) {
     typeof stream[Symbol.asyncIterator] !== 'function'
   ) {
     const error = new Error(
-      'Catalyst File Store did not return a readable download stream.'
+      'Stratus did not return a readable download stream.'
     );
     error.code = 'MEDIA_DOWNLOAD_INVALID';
     throw error;
@@ -208,54 +213,66 @@ async function streamToBuffer(stream) {
 }
 
 async function download(reference, req) {
-  if (!isCatalystReference(reference)) {
+  const objectKey = objectKeyFromReference(reference);
+
+  if (!objectKey) {
     return null;
   }
 
-  const fileId = fileIdFromReference(reference);
-  const folder = await getFolder(req);
+  const bucket = getBucket(req);
 
-  const [downloadStream, details] = await Promise.all([
-    folder.downloadFile(fileId),
-    folder.getFileDetails(fileId),
-  ]);
+  const stream = await bucket.getObject(objectKey);
 
-  const buffer = await streamToBuffer(downloadStream);
+  const buffer = await streamToBuffer(stream);
 
   if (!Buffer.isBuffer(buffer) || buffer.length === 0) {
     const error = new Error(
-      'Catalyst File Store returned an empty file.'
+      'Stratus returned an empty file.'
     );
     error.code = 'MEDIA_DOWNLOAD_EMPTY';
     throw error;
   }
 
-  return {
-    buffer,
-    contentType:
+  let contentType = 'application/octet-stream';
+
+  try {
+    const object = bucket.object(objectKey);
+    const details = await object.getDetails();
+
+    contentType =
       details?.content_type ||
       details?.mime_type ||
-      'application/octet-stream',
+      contentType;
+  } catch {
+    // The uploaded content type is already stored in Stratus.
+    // Fall back safely if metadata lookup is unavailable.
+  }
+
+  return {
+    buffer,
+    contentType,
   };
 }
 
 async function deleteReference(reference, req) {
-  if (!isCatalystReference(reference)) {
+  const objectKey = objectKeyFromReference(reference);
+
+  if (!objectKey) {
     return false;
   }
 
-  const folder = await getFolder(req);
+  const bucket = getBucket(req);
 
   try {
-    return await folder.deleteFile(
-      fileIdFromReference(reference)
-    );
+    await bucket.deleteObject(objectKey);
+    return true;
   } catch (error) {
-    if (
-      error?.status === 404 ||
-      error?.statusCode === 404 ||
-      error?.response?.status === 404
-    ) {
+    const status =
+      error?.status ||
+      error?.statusCode ||
+      error?.response?.status;
+
+    if (status === 404) {
       return false;
     }
 
@@ -268,6 +285,6 @@ module.exports = {
   uploadImage,
   download,
   deleteReference,
-  isCatalystReference,
+  isStratusReference,
   toStorageReference,
 };
