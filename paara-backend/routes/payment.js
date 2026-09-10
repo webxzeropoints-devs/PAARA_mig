@@ -71,45 +71,144 @@ async function sendPaidInvoice(orderId) {
     JOIN customers c ON c.id = o.customer_id
     WHERE o.id = $1
   `, [orderId]);
+
   const order = orderRows[0];
-  if (!order) return;
+
+  if (!order || !order.email) {
+    console.error('[ORDER_CONFIRMATION_EMAIL_SKIPPED]', {
+      orderId,
+      reason: !order
+        ? 'Order not found.'
+        : 'Customer email address is missing.',
+    });
+    return;
+  }
 
   const { rows: items } = await db.query(
     'SELECT * FROM order_items WHERE order_id = $1 ORDER BY id ASC',
     [orderId]
   );
+
   const { rows: addressRows } = await db.query(
     'SELECT * FROM addresses WHERE id = $1 AND customer_id = $2',
     [order.address_id, order.customer_id]
   );
+
   const address = addressRows[0];
+
   const pdf = await createInvoicePdf(order, items, address);
+
+  const orderDate = order.created_at
+    ? new Date(order.created_at).toLocaleString('en-IN', {
+        dateStyle: 'medium',
+        timeStyle: 'short',
+      })
+    : new Date().toLocaleString('en-IN', {
+        dateStyle: 'medium',
+        timeStyle: 'short',
+      });
+
   const itemLines = items
-    .map((item) => `${item.product_name} x ${item.quantity} @ INR ${item.unit_price} = INR ${item.line_total}`)
-    .join('\n');
+    .map((item, index) => {
+      const unitPrice = Number(item.unit_price || 0).toLocaleString('en-IN', {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+      });
+
+      const lineTotal = Number(item.line_total || 0).toLocaleString('en-IN', {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+      });
+
+      return [
+        `${index + 1}. ${item.product_name}`,
+        `   Quantity: ${item.quantity}`,
+        `   Unit Price: INR ${unitPrice}`,
+        `   Item Total: INR ${lineTotal}`,
+      ].join('\n');
+    })
+    .join('\n\n');
+
   const addressText = address
-    ? `${address.line1}, ${address.city}, ${address.state} - ${address.pincode}`
+    ? [
+        address.line1,
+        address.line2,
+        address.city,
+        address.state,
+        address.pincode,
+        'India',
+      ]
+        .filter(Boolean)
+        .join(', ')
     : 'Not available';
 
-  await trySendEmail({
-    to: order.email,
-    subject: `Paara invoice for order ${order.order_number}`,
-    text: `Order ID: ${order.order_number}
-Payment Reference: ${order.payment_reference}
+  const subtotal = Number(order.subtotal || 0).toLocaleString('en-IN', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
 
-Items:
+  const shipping = Number(order.shipping_amount || 0).toLocaleString('en-IN', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+
+  const total = Number(order.total_amount || 0).toLocaleString('en-IN', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+
+  await trySendEmail(
+    {
+      to: order.email,
+      subject: `Order confirmed — ${order.order_number || `Order ${order.id}`}`,
+      text: `Hi ${order.name || 'Customer'},
+
+Thank you for shopping with Paara Jewellery.
+
+Your payment has been successfully received and your order has been confirmed.
+
+ORDER DETAILS
+-------------
+Order ID: ${order.order_number || order.id}
+Order Date: ${orderDate}
+Payment Method: ${order.payment_method || 'PayU'}
+Payment Status: ${order.payment_status || 'paid'}
+Payment Reference: ${order.payment_reference || 'Not available'}
+
+ITEMS PURCHASED
+---------------
 ${itemLines}
 
-Taxes: Included in product prices
-Shipping: INR ${order.shipping_amount}
-Total: INR ${order.total_amount}
-Shipping address: ${addressText}`,
-    attachments: [{
-      filename: `paara-invoice-${order.order_number}.pdf`,
-      content: pdf,
-      contentType: 'application/pdf',
-    }],
-  }, `invoice for order ${order.order_number}`);
+ORDER TOTAL
+-----------
+Subtotal: INR ${subtotal}
+Delivery Charge: INR ${shipping}
+Total Paid: INR ${total}
+
+DELIVERY ADDRESS
+----------------
+${addressText}
+
+Your official invoice is attached to this email as a PDF.
+
+You can also view your order from your Paara Jewellery account.
+
+Thank you for choosing Paara Jewellery.
+
+Warm regards,
+Paara Jewellery
+https://paarajewellery.in
+`,
+      attachments: [
+        {
+          filename: `paara-invoice-${order.order_number || order.id}.pdf`,
+          content: pdf,
+          contentType: 'application/pdf',
+        },
+      ],
+    },
+    `order confirmation email for ${order.order_number || order.id}`
+  );
 }
 
 async function processPayuCallback(payload, expectedStatus) {
