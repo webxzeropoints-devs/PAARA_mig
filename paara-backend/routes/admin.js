@@ -324,6 +324,149 @@ router.delete('/categories/:id', async (q, s) => {
   }
 });
 
+// -----------------------------
+// Shipping Charges
+// -----------------------------
+
+router.get('/shipping', async (q, s) => {
+  try {
+    const result = await db.query(`
+      SELECT id, name, flat_shipping_rate
+      FROM cities
+      ORDER BY LOWER(name) ASC
+    `);
+
+    return s.json(result.rows);
+  } catch (error) {
+    console.error('[ADMIN_SHIPPING_LIST_FAILED]', error.message);
+    return s.status(500).json({
+      error: 'Could not load shipping charges.',
+    });
+  }
+});
+
+router.post('/shipping', async (q, s) => {
+  try {
+    const name = String(q.body?.name || '').trim();
+    const rate = Number(q.body?.flat_shipping_rate);
+
+    if (!name) {
+      return s.status(400).json({
+        error: 'District or city name is required.',
+      });
+    }
+
+    if (!Number.isFinite(rate) || rate < 0) {
+      return s.status(400).json({
+        error: 'Delivery charge must be a valid non-negative number.',
+      });
+    }
+
+    const result = await db.query(
+      `
+        INSERT INTO cities (name, flat_shipping_rate)
+        VALUES ($1, $2)
+        RETURNING id, name, flat_shipping_rate
+      `,
+      [name, rate]
+    );
+
+    return s.status(201).json(result.rows[0]);
+  } catch (error) {
+    if (error.code === '23505') {
+      return s.status(409).json({
+        error: 'A shipping charge for this district or city already exists.',
+      });
+    }
+
+    console.error('[ADMIN_SHIPPING_CREATE_FAILED]', error.message);
+
+    return s.status(500).json({
+      error: 'Could not create shipping charge.',
+    });
+  }
+});
+
+router.put('/shipping/:id', async (q, s) => {
+  try {
+    const name = String(q.body?.name || '').trim();
+    const rate = Number(q.body?.flat_shipping_rate);
+
+    if (!name) {
+      return s.status(400).json({
+        error: 'District or city name is required.',
+      });
+    }
+
+    if (!Number.isFinite(rate) || rate < 0) {
+      return s.status(400).json({
+        error: 'Delivery charge must be a valid non-negative number.',
+      });
+    }
+
+    const result = await db.query(
+      `
+        UPDATE cities
+        SET name = $1,
+            flat_shipping_rate = $2
+        WHERE id = $3
+        RETURNING id, name, flat_shipping_rate
+      `,
+      [name, rate, q.params.id]
+    );
+
+    if (result.rowCount === 0) {
+      return s.status(404).json({
+        error: 'Shipping charge not found.',
+      });
+    }
+
+    return s.json(result.rows[0]);
+  } catch (error) {
+    if (error.code === '23505') {
+      return s.status(409).json({
+        error: 'A shipping charge for this district or city already exists.',
+      });
+    }
+
+    console.error('[ADMIN_SHIPPING_UPDATE_FAILED]', error.message);
+
+    return s.status(500).json({
+      error: 'Could not update shipping charge.',
+    });
+  }
+});
+
+router.delete('/shipping/:id', async (q, s) => {
+  try {
+    const result = await db.query(
+      `
+        DELETE FROM cities
+        WHERE id = $1
+        RETURNING id
+      `,
+      [q.params.id]
+    );
+
+    if (result.rowCount === 0) {
+      return s.status(404).json({
+        error: 'Shipping charge not found.',
+      });
+    }
+
+    return s.json({
+      success: true,
+      id: result.rows[0].id,
+    });
+  } catch (error) {
+    console.error('[ADMIN_SHIPPING_DELETE_FAILED]', error.message);
+
+    return s.status(500).json({
+      error: 'Could not delete shipping charge.',
+    });
+  }
+});
+
 router.get('/customers', async (q, s) => {
   try {
     const result = await db.query(`
