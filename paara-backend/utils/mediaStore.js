@@ -1,5 +1,7 @@
 const crypto = require('crypto');
-const { Readable } = require('stream');
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
 
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
 
@@ -102,26 +104,50 @@ async function uploadImage(file, prefix = 'image', req) {
 
   const folder = await getFolder(req);
 
-  const details = await folder.uploadFile({
-    code: Readable.from(file.buffer),
-    name: filename,
-  });
+  /*
+   * Catalyst Node File Store expects the upload `code` to be
+   * a real filesystem ReadStream. Multer gives us the file in
+   * memory, so write it temporarily to /tmp and create a
+   * ReadStream from that file.
+   *
+   * AppSail instances provide writable temporary storage under
+   * the OS temp directory.
+   */
+  const tempPath = path.join(
+    os.tmpdir(),
+    `paara-${crypto.randomUUID()}${sanitizeName(file.originalname)}`
+  );
 
-  const fileId = details?.id || details?.file_id;
+  try {
+    await fs.promises.writeFile(tempPath, file.buffer);
 
-  if (!fileId) {
-    const error = new Error(
-      'Catalyst File Store did not return a file ID.'
-    );
-    error.code = 'MEDIA_UPLOAD_UNVERIFIED';
-    throw error;
+    const details = await folder.uploadFile({
+      code: fs.createReadStream(tempPath),
+      name: filename,
+    });
+
+    const fileId = details?.id || details?.file_id;
+
+    if (!fileId) {
+      const error = new Error(
+        'Catalyst File Store did not return a file ID.'
+      );
+      error.code = 'MEDIA_UPLOAD_UNVERIFIED';
+      throw error;
+    }
+
+    return {
+      reference: `catalyst-file:${fileId}`,
+      fileId: String(fileId),
+      contentType: file.mimetype,
+    };
+  } finally {
+    try {
+      await fs.promises.unlink(tempPath);
+    } catch {
+      // Ignore cleanup failures.
+    }
   }
-
-  return {
-    reference: `catalyst-file:${fileId}`,
-    fileId: String(fileId),
-    contentType: file.mimetype,
-  };
 }
 
 function isCatalystReference(value) {
