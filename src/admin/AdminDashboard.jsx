@@ -53,9 +53,26 @@ export default function AdminDashboard() {
     setLoading(true);
     setError("");
     try {
-      const [p, c] = await Promise.all([adminListProducts(), adminListCategories()]);
-      setProducts(p || []);
-      setCategories(c || []);
+      const [p, c] = await Promise.all([
+        adminListProducts(),
+        adminListCategories(),
+      ]);
+      
+      setProducts(
+        Array.isArray(p)
+          ? p
+          : Array.isArray(p?.products)
+            ? p.products
+            : []
+      );
+      
+      setCategories(
+        Array.isArray(c)
+          ? c
+          : Array.isArray(c?.categories)
+            ? c.categories
+            : []
+      );
     } catch (err) {
       setError(err.message || "Failed to load products.");
     } finally {
