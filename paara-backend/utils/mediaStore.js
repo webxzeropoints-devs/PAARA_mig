@@ -27,7 +27,7 @@ function getCatalystApp(req) {
     }
 
     // AppSail: initialize the Catalyst SDK with the Express request.
-    return catalyst.initialize(req, { scope: 'admin' });
+    return catalyst.initialize(req);
   } catch (error) {
     error.code = error.code || 'MEDIA_STORAGE_NOT_CONFIGURED';
     throw error;
