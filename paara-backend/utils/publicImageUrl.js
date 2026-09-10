@@ -8,7 +8,7 @@ module.exports = (value) => {
     return image || null;
   }
 
-  // New Stratus image reference
+  // Stratus image reference
   if (/^stratus:/i.test(image)) {
     const objectKey = image.slice('stratus:'.length);
 
@@ -16,7 +16,7 @@ module.exports = (value) => {
       return null;
     }
 
-    return `/media/${encodeURIComponent(objectKey)}`;
+    return `/media/${objectKey}`;
   }
 
   // Legacy Catalyst File Store reference
@@ -65,7 +65,9 @@ module.exports = (value) => {
       image.slice(1)
     );
 
-    return fs.existsSync(localPath) ? image : null;
+    return fs.existsSync(localPath)
+      ? image
+      : null;
   }
 
   return image;
