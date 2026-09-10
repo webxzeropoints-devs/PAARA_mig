@@ -27,8 +27,10 @@ export default function OrderConfirmation() {
   const loyaltyAnimationMarkedRef = React.useRef(false);
 
   useEffect(() => {
-    if (location.state?.clearCart) clear();
-  }, [clear, location.state?.clearCart]);
+    if (location.state?.clearCart || paymentSuccess) {
+      clear();
+    }
+  }, [clear, location.state?.clearCart, paymentSuccess]);
 
   const copyOrderId = async () => {
     const value = order?.order_number || order?.order_id || orderId;
@@ -150,7 +152,7 @@ export default function OrderConfirmation() {
             Thank you
           </p>
           <h1 className="font-display text-3xl md:text-4xl mb-2">
-            {paymentSuccess ? "Your order has been placed successfully!" : "Your order is confirmed"}
+            {paymentSuccess ? "Your order has been placed successfully!" : "Payment was not completed"}
           </h1>
           <p className="text-sm text-cocoa/60 mb-8">
             <span className="inline-flex flex-wrap items-center gap-2">
