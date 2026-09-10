@@ -335,7 +335,7 @@ router.post('/proforma', requireAuth, async (req, res) => {
 router.get('/', requireAuth, async (req, res) => {
   try {
     const { rows: orders } = await db.query(
-      "SELECT * FROM orders WHERE customer_id = $1 AND (status = 'Delivered' OR status = 'delivered') ORDER BY created_at DESC",
+      "SELECT * FROM orders WHERE customer_id = $1 ORDER BY created_at DESC",
       [req.customer.id]
     );
 
