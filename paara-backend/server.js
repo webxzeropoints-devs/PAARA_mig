@@ -368,7 +368,17 @@ if (db.isServerless) {
   module.exports = app;
 } else {
   const PORT = process.env.X_ZOHO_CATALYST_LISTEN_PORT || process.env.PORT || 4000;
-  const server = app.listen(PORT, () => console.log(`Paara backend running on http://localhost:${PORT}`));
+
+  const server = app.listen(PORT, async () => {
+    console.log(`Paara backend running on http://localhost:${PORT}`);
+
+    try {
+      await db.ensurePaaraStoryTable();
+      console.log('[DB] Paara Story table verified.');
+    } catch (error) {
+      console.error('[DB] Failed to initialize Paara Story table:', error.message);
+    }
+  });
 
   server.on('error', (e) => {
     if (e.code === 'EADDRINUSE') {
