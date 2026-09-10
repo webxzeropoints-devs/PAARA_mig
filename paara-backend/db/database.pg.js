@@ -53,6 +53,7 @@ module.exports = {
   pool,
   query,
   close,
+  ensurePaaraStoryTable,
   isServerless: false,
   persist: async () => true,
   persistAfterWrite: async () => true,
