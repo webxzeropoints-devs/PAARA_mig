@@ -1,6 +1,7 @@
 const express = require('express');
 const db = require('../db/database.pg');
 const publicImageUrl = require('../utils/publicImageUrl');
+const publicHomepageImageUrl = require('../utils/publicHomepageImageUrl');
 
 const router = express.Router();
 
@@ -105,8 +106,8 @@ router.get('/paara-irl', async (req, res) => {
       row
         ? {
             ...row,
-            image_url: publicImageUrl(row.image_url),
-            owner_image_url: publicImageUrl(
+            image_url: publicHomepageImageUrl(row.image_url),
+            owner_image_url: publicHomepageImageUrl(
               row.owner_image_url
             ),
           }
@@ -148,7 +149,7 @@ router.get('/worn-by-you', async (req, res) => {
     return res.json(
       result.rows.map((row) => ({
         ...row,
-        image_url: publicImageUrl(row.image_url),
+        image_url: publicHomepageImageUrl(row.image_url),
       }))
     );
   } catch (error) {

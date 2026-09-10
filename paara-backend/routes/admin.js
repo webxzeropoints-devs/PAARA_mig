@@ -3,6 +3,7 @@ const db = require('../db/database.pg');
 const { requireAdmin } = require('../middleware/admin');
 const { processLoyaltyOrder } = require('../services/loyalty');
 const publicImageUrl = require('../utils/publicImageUrl');
+const publicHomepageImageUrl = require('../utils/publicHomepageImageUrl');
 const mediaStore = require('../utils/mediaStore');
 const { getEmailConfigurationStatus } = require('../utils/email');
 
@@ -460,11 +461,20 @@ router.delete('/customers/:id', async (q, s) => {
 });
 
 router.post('/vault', async (q, s) => {
-  const ids = q.body.product_ids;
+  const rawIds = q.body.product_ids;
 
   if (
-    !Array.isArray(ids) ||
-    ids.length !== 3 ||
+    !Array.isArray(rawIds) ||
+    rawIds.length !== 3
+  ) {
+    return s.status(400).json({
+      error: 'Select exactly three distinct products for the vault.',
+    });
+  }
+
+  const ids = rawIds.map((id) => Number(id));
+  if (
+    ids.some((id) => !Number.isInteger(id) || id < 1) ||
     new Set(ids).size !== 3
   ) {
     return s.status(400).json({
@@ -477,14 +487,36 @@ router.post('/vault', async (q, s) => {
   try {
     await client.query('BEGIN');
 
+    const existingProducts = await client.query(
+      'SELECT id FROM products WHERE id = ANY($1::int[])',
+      [ids]
+    );
+    if (existingProducts.rowCount !== ids.length) {
+      await client.query('ROLLBACK');
+      return s.status(404).json({
+        error: 'One or more selected products no longer exist.',
+      });
+    }
+
     await client.query(
-      'UPDATE products SET is_vault = FALSE, vault_sort_order = NULL'
+      'UPDATE products SET is_vault = FALSE, vault_sort_order = 0'
+    );
+
+    await client.query(
+      'DELETE FROM vault_products'
     );
 
     for (const [index, id] of ids.entries()) {
       await client.query(
         'UPDATE products SET is_vault = TRUE, vault_sort_order = $1 WHERE id = $2',
         [index, id]
+      );
+      await client.query(
+        `INSERT INTO vault_products (product_id, sort_order)
+         VALUES ($1, $2)
+         ON CONFLICT (product_id)
+         DO UPDATE SET sort_order = EXCLUDED.sort_order`,
+        [id, index]
       );
     }
 
@@ -886,6 +918,56 @@ router.delete('/products/:id', async (q, s) => {
 
 const keys = ['pearls', 'gold', 'ocean'];
 
+router.get('/collection-tiles', async (q, s) => {
+  try {
+    const result = await db.query(`
+      SELECT tile_key, label, subtitle, image_url, link_path
+      FROM collection_tiles
+      ORDER BY id
+    `);
+
+    return s.json(result.rows);
+  } catch (error) {
+    console.error('[ADMIN_COLLECTION_TILES_LIST_FAILED]', error.message);
+    return s.status(500).json({
+      error: 'Could not load collection tiles.',
+    });
+  }
+});
+
+router.put('/collection-tiles/:tile_key', async (q, s) => {
+  const { label } = q.body || {};
+  const cleanLabel = String(label || '').trim();
+
+  if (!keys.includes(q.params.tile_key)) {
+    return s.status(400).json({ error: 'Invalid tile key.' });
+  }
+
+  if (!cleanLabel) {
+    return s.status(400).json({ error: 'label is required.' });
+  }
+
+  try {
+    const result = await db.query(`
+      UPDATE collection_tiles
+      SET label = $1
+      WHERE tile_key = $2
+      RETURNING tile_key, label, subtitle, image_url, link_path
+    `, [cleanLabel, q.params.tile_key]);
+
+    if (result.rowCount === 0) {
+      return s.status(404).json({ error: 'Collection tile not found.' });
+    }
+
+    return s.json(result.rows[0]);
+  } catch (error) {
+    console.error('[ADMIN_COLLECTION_TILE_UPDATE_FAILED]', error.message);
+    return s.status(400).json({
+      error: 'Could not update the collection tile label.',
+    });
+  }
+});
+
 router.get('/tile-products/:tile_key', async (q, s) => {
   if (!keys.includes(q.params.tile_key)) {
     return s.status(400).json({
@@ -992,8 +1074,8 @@ router.get('/paara-irl', async (q, s) => {
       row
         ? {
             ...row,
-            image_url: publicImageUrl(row.image_url),
-            owner_image_url: publicImageUrl(row.owner_image_url),
+            image_url: publicHomepageImageUrl(row.image_url),
+            owner_image_url: publicHomepageImageUrl(row.owner_image_url),
           }
         : null
     );
@@ -1234,7 +1316,10 @@ router.get('/worn-by-you', async (q, s) => {
       ORDER BY sort_order ASC, id ASC
     `);
 
-    return s.json(result.rows);
+    return s.json(result.rows.map((row) => ({
+      ...row,
+      image_url: publicHomepageImageUrl(row.image_url),
+    })));
   } catch (error) {
     console.error('[ADMIN_WORN_BY_YOU_GET_FAILED]', error.message);
 
@@ -1384,7 +1469,7 @@ router.put('/worn-by-you', async (q, s) => {
         success: true,
         slots: saved.map((row) => ({
           ...row,
-          image_url: publicImageUrl(row.image_url),
+          image_url: publicHomepageImageUrl(row.image_url),
         })),
       });
     } catch (error) {
@@ -2150,9 +2235,6 @@ router.post('/orders/:id/grant-gift-card', async (q, s) => {
 });
 module.exports = router;
 module.exports.normalizeFormBoolean = normalizeFormBoolean;
-
-
-
 
 
 
