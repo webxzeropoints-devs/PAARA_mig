@@ -2,6 +2,7 @@ const crypto = require('crypto');
 const { Readable } = require('stream');
 
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
+
 const ALLOWED_IMAGE_TYPES = new Set([
   'image/jpeg',
   'image/png',
@@ -11,20 +12,28 @@ const ALLOWED_IMAGE_TYPES = new Set([
   'image/avif',
 ]);
 
-let folderPromise;
-
-function getCatalystApp() {
+function getCatalystApp(req) {
   try {
     const catalyst = require('zcatalyst-sdk-node');
-    return catalyst.initializeApp();
+
+    if (!req) {
+      const error = new Error(
+        'Catalyst request context is required for File Store operations.'
+      );
+      error.code = 'MEDIA_STORAGE_NOT_CONFIGURED';
+      throw error;
+    }
+
+    return catalyst.initialize(req, { scope: 'admin' });
   } catch (error) {
     error.code = error.code || 'MEDIA_STORAGE_NOT_CONFIGURED';
     throw error;
   }
 }
 
-async function getFolder() {
+async function getFolder(req) {
   const folderId = String(process.env.PAARA_MEDIA_FOLDER_ID || '').trim();
+
   if (!folderId) {
     const error = new Error(
       'Catalyst File Store is not configured. Set PAARA_MEDIA_FOLDER_ID for the media folder.'
@@ -33,16 +42,22 @@ async function getFolder() {
     throw error;
   }
 
-  if (!folderPromise) {
-    folderPromise = Promise.resolve(getCatalystApp().filestore().folder(folderId));
-  }
-  return folderPromise;
+  const catalystApp = getCatalystApp(req);
+
+  return catalystApp.filestore().folder(folderId);
 }
 
 function sanitizeName(value) {
   const name = String(value || 'image').normalize('NFKC');
-  const extension = name.includes('.') ? name.slice(name.lastIndexOf('.')) : '';
-  const safeExtension = extension.toLowerCase().replace(/[^a-z0-9.]/g, '').slice(0, 10);
+  const extension = name.includes('.')
+    ? name.slice(name.lastIndexOf('.'))
+    : '';
+
+  const safeExtension = extension
+    .toLowerCase()
+    .replace(/[^a-z0-9.]/g, '')
+    .slice(0, 10);
+
   return safeExtension || '.bin';
 }
 
@@ -52,11 +67,15 @@ function validateImage(file) {
     error.code = 'INVALID_IMAGE_UPLOAD';
     throw error;
   }
+
   if (!ALLOWED_IMAGE_TYPES.has(String(file.mimetype || '').toLowerCase())) {
-    const error = new Error('Only JPEG, PNG, GIF, WebP, AVIF, or SVG images are allowed.');
+    const error = new Error(
+      'Only JPEG, PNG, GIF, WebP, AVIF, or SVG images are allowed.'
+    );
     error.code = 'INVALID_IMAGE_TYPE';
     throw error;
   }
+
   if (file.buffer.length > MAX_IMAGE_BYTES) {
     const error = new Error('Images must be 5 MB or smaller.');
     error.code = 'IMAGE_TOO_LARGE';
@@ -64,20 +83,34 @@ function validateImage(file) {
   }
 }
 
-async function uploadImage(file, prefix = 'image') {
+async function uploadImage(file, prefix = 'image', req) {
   validateImage(file);
-  const filename = `${String(prefix).replace(/[^a-z0-9-]/gi, '-').slice(0, 32)}-${Date.now()}-${crypto.randomUUID()}${sanitizeName(file.originalname)}`;
-  const folder = await getFolder();
+
+  const filename =
+    `${String(prefix)
+      .replace(/[^a-z0-9-]/gi, '-')
+      .slice(0, 32)}-` +
+    `${Date.now()}-` +
+    `${crypto.randomUUID()}` +
+    `${sanitizeName(file.originalname)}`;
+
+  const folder = await getFolder(req);
+
   const details = await folder.uploadFile({
     code: Readable.from(file.buffer),
     name: filename,
   });
+
   const fileId = details?.id || details?.file_id;
+
   if (!fileId) {
-    const error = new Error('Catalyst File Store did not return a file ID.');
+    const error = new Error(
+      'Catalyst File Store did not return a file ID.'
+    );
     error.code = 'MEDIA_UPLOAD_UNVERIFIED';
     throw error;
   }
+
   return {
     reference: `catalyst-file:${fileId}`,
     fileId: String(fileId),
@@ -86,48 +119,77 @@ async function uploadImage(file, prefix = 'image') {
 }
 
 function isCatalystReference(value) {
-  return /^catalyst-file:[^/]+$/i.test(String(value || '').trim());
+  return /^catalyst-file:[^/]+$/i.test(
+    String(value || '').trim()
+  );
 }
 
 function toStorageReference(value) {
   const image = String(value || '').trim();
+
   if (isCatalystReference(image)) return image;
-  const match = image.match(/^\/media\/([A-Za-z0-9_-]+)$/i);
-  return match ? `catalyst-file:${decodeURIComponent(match[1])}` : image;
+
+  const match = image.match(
+    /^\/media\/([A-Za-z0-9_-]+)$/i
+  );
+
+  return match
+    ? `catalyst-file:${decodeURIComponent(match[1])}`
+    : image;
 }
 
 function fileIdFromReference(value) {
-  return String(value || '').trim().slice('catalyst-file:'.length);
+  return String(value || '')
+    .trim()
+    .slice('catalyst-file:'.length);
 }
 
-async function download(reference) {
+async function download(reference, req) {
   if (!isCatalystReference(reference)) return null;
+
   const fileId = fileIdFromReference(reference);
-  const folder = await getFolder();
+  const folder = await getFolder(req);
+
   const [buffer, details] = await Promise.all([
     folder.downloadFile(fileId),
     folder.getFileDetails(fileId),
   ]);
+
   if (!Buffer.isBuffer(buffer) || buffer.length === 0) {
-    const error = new Error('Catalyst File Store returned an empty file.');
+    const error = new Error(
+      'Catalyst File Store returned an empty file.'
+    );
     error.code = 'MEDIA_DOWNLOAD_EMPTY';
     throw error;
   }
+
   return {
     buffer,
-    contentType: details?.content_type || details?.mime_type || 'application/octet-stream',
+    contentType:
+      details?.content_type ||
+      details?.mime_type ||
+      'application/octet-stream',
   };
 }
 
-async function deleteReference(reference) {
+async function deleteReference(reference, req) {
   if (!isCatalystReference(reference)) return false;
-  const folder = await getFolder();
+
+  const folder = await getFolder(req);
+
   try {
-    return await folder.deleteFile(fileIdFromReference(reference));
+    return await folder.deleteFile(
+      fileIdFromReference(reference)
+    );
   } catch (error) {
-    if (error?.status === 404 || error?.statusCode === 404 || error?.response?.status === 404) {
+    if (
+      error?.status === 404 ||
+      error?.statusCode === 404 ||
+      error?.response?.status === 404
+    ) {
       return false;
     }
+
     throw error;
   }
 }
