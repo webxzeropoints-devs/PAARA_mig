@@ -116,22 +116,24 @@ app.use((req, res, next) => {
 
 // Serve the shared public assets used by the storefront and local upload files.
 app.use('/images', express.static(path.join(__dirname, '..', 'public', 'images')));
-app.get('/media/*', async (req, res) => {
-  const objectKey = String(req.params[0] || '').trim();
 
-  if (!objectKey || objectKey.includes('..')) {
+app.get('/media/*', async (req, res) => {
+  const rawObjectKey = String(req.params[0] || '').trim();
+
+  if (!rawObjectKey) {
     return res.status(404).end();
   }
 
   try {
-    const decodedObjectKey = decodeURIComponent(objectKey);
+    const objectKey = decodeURIComponent(rawObjectKey);
 
-    if (!decodedObjectKey || decodedObjectKey.includes('..')) {
+    // Prevent path traversal.
+    if (!objectKey || objectKey.includes('..')) {
       return res.status(404).end();
     }
 
     const media = await mediaStore.download(
-      `stratus:${decodedObjectKey}`,
+      `stratus:${objectKey}`,
       req
     );
 
@@ -145,7 +147,7 @@ app.get('/media/*', async (req, res) => {
     return res.end(media.buffer);
   } catch (error) {
     console.error('[MEDIA_DOWNLOAD_FAILED]', {
-      objectKey,
+      objectKey: rawObjectKey,
       message: error.message,
       code: error.code,
     });
@@ -159,6 +161,7 @@ app.get('/media/*', async (req, res) => {
       .end();
   }
 });
+
 app.get('/images/blob/*', async (req, res) => {
   try {
     const pathname = decodeURIComponent(req.params[0] || '');
