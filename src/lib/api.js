@@ -243,6 +243,26 @@ export const getVaultNext = () => apiGet("/vault/next");
 export const getShippingCities = () => apiGet("/shipping/cities");
 export const postShippingQuote = (payload) => apiPost("/shipping/quote", payload);
 
+export const adminListShippingCities = () =>
+  adminRequest("/admin/shipping");
+
+export const adminCreateShippingCity = (payload) =>
+  adminRequest("/admin/shipping", {
+    method: "POST",
+    body: payload,
+  });
+
+export const adminUpdateShippingCity = (id, payload) =>
+  adminRequest(`/admin/shipping/${id}`, {
+    method: "PUT",
+    body: payload,
+  });
+
+export const adminDeleteShippingCity = (id) =>
+  adminRequest(`/admin/shipping/${id}`, {
+    method: "DELETE",
+  });
+
 export const getAddresses = () => apiGet("/addresses");
 export const postAddress = (payload) => apiPost("/addresses", payload);
 export const updateAddress = (id, payload) => apiPut(`/addresses/${encodeURIComponent(id)}`, payload);
