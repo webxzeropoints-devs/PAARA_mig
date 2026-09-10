@@ -117,7 +117,10 @@ app.get('/media/:fileId', async (req, res) => {
   const fileId = String(req.params.fileId || '').trim();
   if (!/^[A-Za-z0-9_-]+$/.test(fileId)) return res.status(404).end();
   try {
-    const media = await mediaStore.download(`catalyst-file:${fileId}`);
+    const media = await mediaStore.download(
+      `catalyst-file:${fileId}`,
+      req
+    );
     if (!media) return res.status(404).end();
     res.set('Content-Type', media.contentType);
     res.set('Content-Length', String(media.buffer.length));
