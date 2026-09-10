@@ -105,11 +105,12 @@ async function createOrder({ customerId, items, addressId, paymentMethod = 'payu
       0
     );
 
-    const shipping = calculateShipping({
+    const shipping = await calculateShipping({
       city: address.city,
       state: address.state,
       paymentMethod: normalizedPaymentMethod,
-      totalWeightKg
+      totalWeightKg,
+      db: client
     });
 
     const totalAmount = round2(subtotal + gstAmount + shipping.amount);
@@ -289,11 +290,12 @@ router.post('/proforma', requireAuth, async (req, res) => {
       0
     );
 
-    const shipping = calculateShipping({
+    const shipping = await calculateShipping({
       city: address.city,
       state: address.state,
       paymentMethod,
-      totalWeightKg
+      totalWeightKg,
+      db
     });
 
     const pdf = await createInvoicePdf({
