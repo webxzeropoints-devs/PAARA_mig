@@ -22,7 +22,7 @@ router.get('/cities', async (req, res) => {
 });
 
 // POST /api/shipping/quote
-router.post('/quote', (req, res) => {
+router.post('/quote', async (req, res) => {
   const {
     city,
     state,
@@ -36,15 +36,16 @@ router.post('/quote', (req, res) => {
         error: 'PayU is the only available payment method.',
       });
     }
-    return res.json(
-      calculateShipping({
-        city,
-        state,
-        paymentMethod: payment_method,
-        totalWeightKg: total_weight_kg,
-        db,
-      })
-    );
+
+    const shipping = await calculateShipping({
+      city,
+      state,
+      paymentMethod: payment_method,
+      totalWeightKg: total_weight_kg,
+      db,
+    });
+
+    return res.json(shipping);
   } catch (error) {
     return res.status(400).json({
       error: error.message,
