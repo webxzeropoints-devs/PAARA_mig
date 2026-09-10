@@ -115,17 +115,30 @@ const orderedImageUrls = ({ uploadedImages, existingImages, uploadSlots, existin
   return [...slots.entries()].sort(([left], [right]) => left - right).map(([, url]) => url);
 };
 
-const saveUploadedImages = async (files) => {
+const saveUploadedImages = async (files, req) => {
   if (!files || files.length === 0) return [];
+
   const uploaded = [];
+
   try {
-    for (const file of files) uploaded.push(await mediaStore.uploadImage(file, 'product'));
+    for (const file of files) {
+      uploaded.push(
+        await mediaStore.uploadImage(file, 'product', req)
+      );
+    }
+
     return uploaded.map((item) => item.reference);
   } catch (error) {
-    await Promise.allSettled(uploaded.map((item) => mediaStore.deleteReference(item.reference)));
+    await Promise.allSettled(
+      uploaded.map((item) =>
+        mediaStore.deleteReference(item.reference, req)
+      )
+    );
+
     throw error;
   }
 };
+
 
 const saveUploadedImage = async (file, prefix) => {
   if (!file) return null;
@@ -602,7 +615,7 @@ router.post('/products', async (q, s) => {
     let uploadedImages = [];
 
     try {
-      uploadedImages = await saveUploadedImages(filesArray);
+      uploadedImages = await saveUploadedImages(filesArray, q);
     } catch (imgErr) {
       const uploadError = safeUploadError(imgErr);
       console.error('[ADMIN_UPLOAD_ERROR]', uploadError);
@@ -702,7 +715,10 @@ router.put('/products/:id', async (q, s) => {
       'SELECT image_url FROM product_images WHERE product_id = $1',
       [q.params.id]
     );
-    const uploadedImages = await saveUploadedImages(asFiles(q.files));
+    const uploadedImages = await saveUploadedImages(
+      asFiles(q.files),
+      q
+    );
 
     const hasExistingImages = Object.prototype.hasOwnProperty.call(
       q.body,
