@@ -3,15 +3,9 @@ const { maskSensitiveText } = require('./validate');
 
 function readSmtpConfig() {
   const port = Number(String(process.env.SMTP_PORT || process.env.EMAIL_PORT || '587').trim());
-  const secureSetting = String(process.env.SMTP_SECURE || '').trim().toLowerCase();
   if (!Number.isInteger(port) || port < 1 || port > 65535) {
     const error = new Error('SMTP_PORT must be a valid TCP port.');
     error.code = 'SMTP_INVALID_PORT';
-    throw error;
-  }
-  if ((port === 465 && secureSetting === 'false') || ([25, 587].includes(port) && secureSetting === 'true')) {
-    const error = new Error(`SMTP_SECURE is incompatible with SMTP_PORT ${port}.`);
-    error.code = 'SMTP_SECURITY_MISMATCH';
     throw error;
   }
   return {
@@ -20,7 +14,7 @@ function readSmtpConfig() {
     host: String(process.env.SMTP_HOST || process.env.EMAIL_HOST || '').trim(),
     port,
     from: String(process.env.SMTP_FROM || process.env.EMAIL_FROM || process.env.EMAIL_USER || '').trim(),
-    secure: port === 465 || (secureSetting === 'true' && ![25, 587].includes(port)),
+    secure: port === 465,
     rejectUnauthorized: String(process.env.SMTP_TLS_REJECT_UNAUTHORIZED || 'true').trim().toLowerCase() !== 'false',
   };
 }
