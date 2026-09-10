@@ -11,6 +11,9 @@ const express = require('express');
 const rateLimit = require('express-rate-limit');
 const multer = require('multer');
 const path = require('path');
+const fs = require('fs');
+const os = require('os');
+const crypto = require('crypto');
 const db = require('./db/database.pg');
 const { requireAdminSession } = require('./middleware/adminAuth');
 const { maskSensitiveText } = require('./utils/validate');
@@ -291,13 +294,16 @@ app.get('/api/db-status', requireAdminSession, (req, res) => {
 
 app.get('/api/health', (req, res) => res.json({ ok: true }));
 
-// TEMPORARY: Test the exact Catalyst File Store folder object
+// TEMPORARY: Test direct Catalyst File Store upload
 app.get('/api/diagnostics/media', async (req, res) => {
   const folderId = String(
     process.env.PAARA_MEDIA_FOLDER_ID || ''
   ).trim();
 
-  const fileId = '6428300000021036';
+  const tempPath = path.join(
+    os.tmpdir(),
+    `paara-diagnostic-${crypto.randomUUID()}.txt`
+  );
 
   try {
     const catalyst = require('zcatalyst-sdk-node');
@@ -306,29 +312,30 @@ app.get('/api/diagnostics/media', async (req, res) => {
     const filestore = catalystApp.filestore();
     const folder = filestore.folder(folderId);
 
-    console.log('[MEDIA_DIAGNOSTIC_FOLDER]', {
-      folderId,
-      fileId,
+    await fs.promises.writeFile(
+      tempPath,
+      `Paara File Store diagnostic ${new Date().toISOString()}`
+    );
+
+    const details = await folder.uploadFile({
+      code: fs.createReadStream(tempPath),
+      name: `paara-diagnostic-${Date.now()}.txt`,
     });
 
-    const fileDetails = await folder.getFileDetails(fileId);
-
-    console.log('[MEDIA_DIAGNOSTIC_FILE_SUCCESS]', {
+    console.log('[MEDIA_DIAGNOSTIC_UPLOAD_SUCCESS]', {
       folderId,
-      fileId,
-      fileDetails,
+      details,
     });
 
     return res.json({
       ok: true,
       folderId,
-      fileId,
-      fileDetails,
+      message: 'AppSail successfully uploaded a file to Catalyst File Store.',
+      details,
     });
   } catch (error) {
-    console.error('[MEDIA_DIAGNOSTIC_FILE_FAILED]', {
+    console.error('[MEDIA_DIAGNOSTIC_UPLOAD_FAILED]', {
       folderId,
-      fileId,
       message: error?.message,
       code: error?.code,
       status: error?.status,
@@ -339,10 +346,15 @@ app.get('/api/diagnostics/media', async (req, res) => {
     return res.status(500).json({
       ok: false,
       folderId,
-      fileId,
       message: error?.message,
       code: error?.code,
     });
+  } finally {
+    try {
+      await fs.promises.unlink(tempPath);
+    } catch {
+      // Ignore cleanup failures.
+    }
   }
 });
 
