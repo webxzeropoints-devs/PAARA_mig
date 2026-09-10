@@ -32,7 +32,9 @@ function getCatalystApp(req) {
 }
 
 async function getFolder(req) {
-  const folderId = String(process.env.PAARA_MEDIA_FOLDER_ID || '').trim();
+  const folderId = String(
+    process.env.PAARA_MEDIA_FOLDER_ID || ''
+  ).trim();
 
   if (!folderId) {
     const error = new Error(
@@ -49,6 +51,7 @@ async function getFolder(req) {
 
 function sanitizeName(value) {
   const name = String(value || 'image').normalize('NFKC');
+
   const extension = name.includes('.')
     ? name.slice(name.lastIndexOf('.'))
     : '';
@@ -68,7 +71,11 @@ function validateImage(file) {
     throw error;
   }
 
-  if (!ALLOWED_IMAGE_TYPES.has(String(file.mimetype || '').toLowerCase())) {
+  if (
+    !ALLOWED_IMAGE_TYPES.has(
+      String(file.mimetype || '').toLowerCase()
+    )
+  ) {
     const error = new Error(
       'Only JPEG, PNG, GIF, WebP, AVIF, or SVG images are allowed.'
     );
@@ -77,7 +84,9 @@ function validateImage(file) {
   }
 
   if (file.buffer.length > MAX_IMAGE_BYTES) {
-    const error = new Error('Images must be 5 MB or smaller.');
+    const error = new Error(
+      'Images must be 5 MB or smaller.'
+    );
     error.code = 'IMAGE_TOO_LARGE';
     throw error;
   }
@@ -127,7 +136,9 @@ function isCatalystReference(value) {
 function toStorageReference(value) {
   const image = String(value || '').trim();
 
-  if (isCatalystReference(image)) return image;
+  if (isCatalystReference(image)) {
+    return image;
+  }
 
   const match = image.match(
     /^\/media\/([A-Za-z0-9_-]+)$/i
@@ -144,16 +155,49 @@ function fileIdFromReference(value) {
     .slice('catalyst-file:'.length);
 }
 
+async function streamToBuffer(stream) {
+  if (Buffer.isBuffer(stream)) {
+    return stream;
+  }
+
+  if (
+    !stream ||
+    typeof stream[Symbol.asyncIterator] !== 'function'
+  ) {
+    const error = new Error(
+      'Catalyst File Store did not return a readable download stream.'
+    );
+    error.code = 'MEDIA_DOWNLOAD_INVALID';
+    throw error;
+  }
+
+  const chunks = [];
+
+  for await (const chunk of stream) {
+    chunks.push(
+      Buffer.isBuffer(chunk)
+        ? chunk
+        : Buffer.from(chunk)
+    );
+  }
+
+  return Buffer.concat(chunks);
+}
+
 async function download(reference, req) {
-  if (!isCatalystReference(reference)) return null;
+  if (!isCatalystReference(reference)) {
+    return null;
+  }
 
   const fileId = fileIdFromReference(reference);
   const folder = await getFolder(req);
 
-  const [buffer, details] = await Promise.all([
+  const [downloadStream, details] = await Promise.all([
     folder.downloadFile(fileId),
     folder.getFileDetails(fileId),
   ]);
+
+  const buffer = await streamToBuffer(downloadStream);
 
   if (!Buffer.isBuffer(buffer) || buffer.length === 0) {
     const error = new Error(
@@ -173,7 +217,9 @@ async function download(reference, req) {
 }
 
 async function deleteReference(reference, req) {
-  if (!isCatalystReference(reference)) return false;
+  if (!isCatalystReference(reference)) {
+    return false;
+  }
 
   const folder = await getFolder(req);
 
