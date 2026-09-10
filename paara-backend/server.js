@@ -301,7 +301,7 @@ app.get('/api/diagnostics/media', async (req, res) => {
 
   try {
     const catalyst = require('zcatalyst-sdk-node');
-    const catalystApp = catalyst.initialize(req);
+    const catalystApp = catalyst.initialize(req, { scope: 'admin' });
 
     const filestore = catalystApp.filestore();
     
