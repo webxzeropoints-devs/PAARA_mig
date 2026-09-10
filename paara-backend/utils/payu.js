@@ -64,7 +64,10 @@ const generateResponseHash = (payload, salt) => {
     payload.txnid || '',
     payload.key || '',
   ];
-  return sha512(`${payload.additional_charges ? `${payload.additional_charges}|` : ''}${values.join('|')}`);
+
+  return sha512(
+    `${payload.additional_charges ? `${payload.additional_charges}|` : ''}${values.join('|')}`
+  );
 };
 
 const hashesMatch = (expected, received) => {
