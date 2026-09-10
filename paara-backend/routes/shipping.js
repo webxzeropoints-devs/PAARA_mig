@@ -40,9 +40,10 @@ router.post('/quote', (req, res) => {
       calculateShipping({
         city,
         state,
-        paymentMethod: payment_method,
-        totalWeightKg: total_weight_kg,
-      })
+        paymentMethod,
+        totalWeightKg,
+        db,
+      });
     );
   } catch (error) {
     return res.status(400).json({
