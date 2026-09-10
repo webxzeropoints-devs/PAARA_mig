@@ -291,38 +291,27 @@ app.get('/api/db-status', requireAdminSession, (req, res) => {
 
 app.get('/api/health', (req, res) => res.json({ ok: true }));
 
-// TEMPORARY: Test AppSail access to Catalyst File Store
+// TEMPORARY: Inspect Catalyst File Store folders visible to AppSail
 app.get('/api/diagnostics/media', async (req, res) => {
-  const folderId = String(
-    process.env.PAARA_MEDIA_FOLDER_ID || ''
-  ).trim();
-
-  const fileId = '6428300000021036';
-
   try {
     const catalyst = require('zcatalyst-sdk-node');
     const catalystApp = catalyst.initialize(req);
 
     const filestore = catalystApp.filestore();
-    
-    const details = await filestore.getFolderDetails(folderId);
 
-    console.log('[MEDIA_DIAGNOSTIC_SUCCESS]', {
-      folderId,
-      fileId,
-      details,
-    });
+    const folders = await filestore.getAllFolders();
+
+    console.log('[MEDIA_DIAGNOSTIC_FOLDERS]', folders);
 
     return res.json({
       ok: true,
-      folderId,
-      fileId,
-      message: 'AppSail can access Catalyst File Store.',
+      configuredFolderId: String(
+        process.env.PAARA_MEDIA_FOLDER_ID || ''
+      ).trim(),
+      folders,
     });
   } catch (error) {
-    console.error('[MEDIA_DIAGNOSTIC_FAILED]', {
-      folderId,
-      fileId,
+    console.error('[MEDIA_DIAGNOSTIC_FOLDERS_FAILED]', {
       message: error?.message,
       code: error?.code,
       status: error?.status,
@@ -332,8 +321,6 @@ app.get('/api/diagnostics/media', async (req, res) => {
 
     return res.status(500).json({
       ok: false,
-      folderId,
-      fileId,
       message: error?.message,
       code: error?.code,
     });
