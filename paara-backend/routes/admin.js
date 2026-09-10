@@ -37,7 +37,23 @@ const safeUploadError = (error) => ({
 });
 
 const deleteIfUnreferenced = async (references, req) => {
-  for (const reference of new Set(references.filter(mediaStore.isCatalystReference))) {
+  const isManagedReference = (reference) => {
+    if (typeof mediaStore.isStratusReference === 'function') {
+      return mediaStore.isStratusReference(reference);
+    }
+
+    if (typeof mediaStore.isCatalystReference === 'function') {
+      return mediaStore.isCatalystReference(reference);
+    }
+
+    return false;
+  };
+
+  for (
+    const reference of new Set(
+      references.filter(isManagedReference)
+    )
+  ) {
     const result = await db.query(`
       SELECT 1 FROM product_images WHERE image_url = $1
       UNION ALL SELECT 1 FROM instagram_reviews WHERE image_url = $1
@@ -46,7 +62,10 @@ const deleteIfUnreferenced = async (references, req) => {
       UNION ALL SELECT 1 FROM admins WHERE profile_image_url = $1
       LIMIT 1
     `, [reference]);
-    if (result.rowCount === 0) await mediaStore.deleteReference(reference, req);
+
+    if (result.rowCount === 0) {
+      await mediaStore.deleteReference(reference, req);
+    }
   }
 };
 
