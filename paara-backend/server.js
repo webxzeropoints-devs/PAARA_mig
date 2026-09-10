@@ -303,11 +303,9 @@ app.get('/api/diagnostics/media', async (req, res) => {
     const catalyst = require('zcatalyst-sdk-node');
     const catalystApp = catalyst.initialize(req);
 
-    const folder = catalystApp
-      .filestore()
-      .folder(folderId);
-
-    const details = await folder.getFileDetails(fileId);
+    const filestore = catalystApp.filestore();
+    
+    const details = await filestore.getFolderDetails(folderId);
 
     console.log('[MEDIA_DIAGNOSTIC_SUCCESS]', {
       folderId,
