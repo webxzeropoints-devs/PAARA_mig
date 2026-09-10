@@ -117,26 +117,21 @@ app.use((req, res, next) => {
 // Serve the shared public assets used by the storefront and local upload files.
 app.use('/images', express.static(path.join(__dirname, '..', 'public', 'images')));
 app.get('/media/*', async (req, res) => {
-  const mediaPath = String(req.params[0] || '').trim();
+  const objectKey = String(req.params[0] || '').trim();
 
-  if (!mediaPath) {
+  if (!objectKey || objectKey.includes('..')) {
     return res.status(404).end();
   }
 
   try {
-    const decodedPath = decodeURIComponent(mediaPath);
+    const decodedObjectKey = decodeURIComponent(objectKey);
 
-    // Prevent path traversal.
-    if (
-      !decodedPath ||
-      decodedPath.includes('..') ||
-      decodedPath.includes('\\')
-    ) {
+    if (!decodedObjectKey || decodedObjectKey.includes('..')) {
       return res.status(404).end();
     }
 
     const media = await mediaStore.download(
-      `stratus:${decodedPath}`,
+      `stratus:${decodedObjectKey}`,
       req
     );
 
@@ -150,14 +145,14 @@ app.get('/media/*', async (req, res) => {
     return res.end(media.buffer);
   } catch (error) {
     console.error('[MEDIA_DOWNLOAD_FAILED]', {
-      mediaPath,
-      message: error?.message,
-      code: error?.code,
+      objectKey,
+      message: error.message,
+      code: error.code,
     });
 
     return res
       .status(
-        error?.code === 'MEDIA_STORAGE_NOT_CONFIGURED'
+        error.code === 'MEDIA_STORAGE_NOT_CONFIGURED'
           ? 503
           : 404
       )
