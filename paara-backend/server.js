@@ -295,7 +295,7 @@ app.get('/api/db-status', requireAdminSession, (req, res) => {
 app.get('/api/health', (req, res) => res.json({ ok: true }));
 
 // TEMPORARY: Test direct Catalyst File Store upload
-app.get('/api/diagnostics/media', async (req, res) => {
+app.get('/api/diagnostics/media-v2', async (req, res) => {
   const folderId = String(
     process.env.PAARA_MEDIA_FOLDER_ID || ''
   ).trim();
