@@ -9,15 +9,15 @@ module.exports = (value) => {
   }
 
   // Stratus image reference
-  if (/^stratus:/i.test(image)) {
-    const objectKey = image.slice('stratus:'.length);
+if (/^stratus:/i.test(image)) {
+  const objectKey = image.slice('stratus:'.length).trim();
 
-    if (!objectKey) {
-      return null;
-    }
-
-    return `/media/${objectKey}`;
+  if (!objectKey || objectKey.includes('..')) {
+    return null;
   }
+
+  return `/media/${objectKey}`;
+}
 
   // Legacy Catalyst File Store reference
   if (/^catalyst-file:[^/]+$/i.test(image)) {
