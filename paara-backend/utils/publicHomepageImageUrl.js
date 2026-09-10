@@ -5,21 +5,18 @@ const publicHomepageImageUrl = (value) => {
     return image || null;
   }
 
-  // Current Stratus media reference.
-  // Example:
-  // stratus:products/worn-by-you-123-uuid.jpg
+  // Current Stratus image reference.
   if (/^stratus:.+$/i.test(image)) {
-    const objectKey = image.slice('stratus:'.length);
+    const objectKey = image.slice('stratus:'.length).trim();
 
     if (!objectKey || objectKey.includes('..')) {
       return null;
     }
 
-    return `/media/${encodeURIComponent(objectKey)}`;
+    return `/media/${objectKey}`;
   }
 
   // Legacy Catalyst File Store reference.
-  // Kept temporarily for old database records.
   if (/^catalyst-file:[^/]+$/i.test(image)) {
     return `/media/${encodeURIComponent(
       image.slice('catalyst-file:'.length)
@@ -38,7 +35,7 @@ const publicHomepageImageUrl = (value) => {
       return `${parsed.pathname}${parsed.search}`;
     }
   } catch {
-    // Preserve relative/legacy values for the frontend to resolve.
+    // Preserve non-URL values for the frontend to resolve.
   }
 
   return image;
