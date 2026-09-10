@@ -3,18 +3,22 @@
 
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { Edit, Save, Search, Trash2, Upload } from "lucide-react";
+import { Edit, Save, Search, Trash2, Upload, Plus } from "lucide-react";
 
 import {
   adminCreateCategory,
   adminCreateProduct,
+  adminCreateShippingCity,
   adminDeleteCategory,
   adminDeleteProduct,
+  adminDeleteShippingCity,
   adminListCategories,
   adminListProducts,
+  adminListShippingCities,
   adminSetVault,
   adminUpdateCategory,
   adminUpdateProduct,
+  adminUpdateShippingCity,
   toBoolean,
 } from "../lib/api";
 
@@ -42,6 +46,9 @@ function Section({ title, subtitle, action, children }) {
 export default function AdminDashboard() {
   const [products, setProducts] = useState([]);
   const [categories, setCategories] = useState([]);
+  const [shippingCities, setShippingCities] = useState([]);
+  const [editingShipping, setEditingShipping] = useState(null);
+  const [shippingCreating, setShippingCreating] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [editing, setEditing] = useState(null); // product being edited in modal
@@ -53,9 +60,10 @@ export default function AdminDashboard() {
     setLoading(true);
     setError("");
     try {
-      const [p, c] = await Promise.all([
+      const [p, c, shipping] = await Promise.all([
         adminListProducts(),
         adminListCategories(),
+        adminListShippingCities(),
       ]);
       
       setProducts(
@@ -73,6 +81,15 @@ export default function AdminDashboard() {
             ? c.categories
             : []
       );
+
+      setShippingCities(
+        Array.isArray(shipping)
+          ? shipping
+          : Array.isArray(shipping?.cities)
+            ? shipping.cities
+            : []
+      );
+      
     } catch (err) {
       setError(err.message || "Failed to load products.");
     } finally {
@@ -121,6 +138,17 @@ export default function AdminDashboard() {
       setError(err.message);
     }
   };
+
+  const handleShippingDelete = async (city) => {
+  if (!window.confirm(`Delete shipping charge for "${city.name}"?`)) return;
+
+  try {
+    await adminDeleteShippingCity(city.id);
+    reload();
+  } catch (err) {
+    setError(err.message);
+  }
+};
 
   const vaultIds = useMemo(
     () => products.filter((p) => toBoolean(p.is_vault)).sort(
@@ -200,6 +228,82 @@ export default function AdminDashboard() {
                 <tr>
                   <td colSpan={4} className="px-4 py-10 text-center text-sm text-cocoa/60">
                     No categories yet. Create one to assign products.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </Section>
+
+      <Section
+        title="Shipping Charges"
+        subtitle="Manage delivery charges by district or city."
+        action={
+          <button
+            type="button"
+            onClick={() => setShippingCreating(true)}
+            className="px-4 py-2 text-xs uppercase tracking-widest border border-gold/40 text-cocoa hover:bg-sand transition-colors"
+          >
+            + Add district
+          </button>
+        }
+      >
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead className="font-display text-left text-xs uppercase tracking-[.18em] text-cocoa border-b border-gold/30">
+              <tr>
+                <th className="px-4 py-3">District / City</th>
+                <th className="px-4 py-3">Delivery Charge</th>
+                <th className="px-4 py-3 text-right">Actions</th>
+              </tr>
+            </thead>
+      
+            <tbody>
+              {shippingCities.map((city) => (
+                <tr
+                  key={city.id}
+                  className="border-b border-cocoa/10 odd:bg-sand/35 hover:bg-sand"
+                >
+                  <td className="px-4 py-3 font-product-name text-cocoa">
+                    {city.name}
+                  </td>
+      
+                  <td className="px-4 py-3 text-cocoa/70">
+                    ₹{Number(city.flat_shipping_rate).toFixed(2)}
+                  </td>
+      
+                  <td className="px-4 py-3 text-right">
+                    <div className="inline-flex gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setEditingShipping(city)}
+                        className="p-2 text-gold hover:bg-sand"
+                        aria-label="Edit shipping charge"
+                      >
+                        <Edit size={15} />
+                      </button>
+      
+                      <button
+                        type="button"
+                        onClick={() => handleShippingDelete(city)}
+                        className="p-2 text-cocoa hover:bg-sand"
+                        aria-label="Delete shipping charge"
+                      >
+                        <Trash2 size={15} />
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+      
+              {shippingCities.length === 0 && (
+                <tr>
+                  <td
+                    colSpan={3}
+                    className="px-4 py-10 text-center text-sm text-cocoa/60"
+                  >
+                    No shipping charges configured.
                   </td>
                 </tr>
               )}
@@ -312,24 +416,196 @@ export default function AdminDashboard() {
         )}
       </Section>
 
-      <AnimatePresence>
-        {(editing || creating) && (
-          <ProductEditor
-            product={editing}
-            categories={categories}
-            onClose={() => { setEditing(null); setCreating(false); }}
-            onSaved={() => { setEditing(null); setCreating(false); reload(); }}
-          />
-        )}
-        {(editingCategory || categoryCreating) && (
-          <CategoryEditor
-            category={editingCategory}
-            onClose={() => { setEditingCategory(null); setCategoryCreating(false); }}
-            onSaved={() => { setEditingCategory(null); setCategoryCreating(false); reload(); }}
-          />
-        )}
-      </AnimatePresence>
+    <AnimatePresence>
+      {(editing || creating) && (
+        <ProductEditor
+          product={editing}
+          categories={categories}
+          onClose={() => { setEditing(null); setCreating(false); }}
+          onSaved={() => { setEditing(null); setCreating(false); reload(); }}
+        />
+      )}
+    
+      {(editingCategory || categoryCreating) && (
+        <CategoryEditor
+          category={editingCategory}
+          onClose={() => { setEditingCategory(null); setCategoryCreating(false); }}
+          onSaved={() => { setEditingCategory(null); setCategoryCreating(false); reload(); }}
+        />
+      )}
+    
+      {(editingShipping || shippingCreating) && (
+        <ShippingEditor
+          city={editingShipping}
+          onClose={() => {
+            setEditingShipping(null);
+            setShippingCreating(false);
+          }}
+          onSaved={() => {
+            setEditingShipping(null);
+            setShippingCreating(false);
+            reload();
+          }}
+        />
+      )}
+    </AnimatePresence>
+
+      
+      
     </div>
+  );
+}
+
+function ShippingEditor({ city, onClose, onSaved }) {
+  const isEdit = Boolean(city);
+
+  const [form, setForm] = useState(() => ({
+    name: city?.name || "",
+    flat_shipping_rate:
+      city?.flat_shipping_rate !== undefined
+        ? String(city.flat_shipping_rate)
+        : "",
+  }));
+
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  const submit = async (e) => {
+    e.preventDefault();
+
+    const name = form.name.trim();
+    const rate = Number(form.flat_shipping_rate);
+
+    if (!name) {
+      setError("District or city name is required.");
+      return;
+    }
+
+    if (!Number.isFinite(rate) || rate < 0) {
+      setError("Enter a valid delivery charge.");
+      return;
+    }
+
+    setSaving(true);
+    setError("");
+
+    try {
+      const payload = {
+        name,
+        flat_shipping_rate: rate,
+      };
+
+      if (isEdit) {
+        await adminUpdateShippingCity(city.id, payload);
+      } else {
+        await adminCreateShippingCity(payload);
+      }
+
+      onSaved();
+    } catch (err) {
+      setError(err.message || "Could not save shipping charge.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      className="fixed inset-0 z-50 bg-cocoa/30 flex items-center justify-center p-5"
+      onClick={onClose}
+    >
+      <motion.div
+        initial={{ y: 12, opacity: 0 }}
+        animate={{ y: 0, opacity: 1 }}
+        exit={{ y: 12, opacity: 0 }}
+        onClick={(e) => e.stopPropagation()}
+        className="bg-shell border border-gold/40 rounded-sm w-full max-w-lg"
+      >
+        <div className="px-6 py-4 border-b border-gold/25 flex items-center justify-between">
+          <h3 className="font-display text-lg tracking-[.16em] text-cocoa">
+            {isEdit ? "Edit shipping charge" : "Add shipping charge"}
+          </h3>
+
+          <button
+            type="button"
+            onClick={onClose}
+            className="text-cocoa/60 hover:text-cocoa text-xs uppercase tracking-widest"
+          >
+            Close
+          </button>
+        </div>
+
+        <form onSubmit={submit} className="p-6 space-y-4">
+          {error && (
+            <div className="px-4 py-3 border border-gold/40 text-cocoa text-sm rounded-sm bg-shell">
+              {error}
+            </div>
+          )}
+
+          <label className="block">
+            <span className="block text-xs uppercase tracking-widest text-cocoa/60 mb-1.5">
+              District / City
+            </span>
+
+            <input
+              value={form.name}
+              onChange={(e) =>
+                setForm((current) => ({
+                  ...current,
+                  name: e.target.value,
+                }))
+              }
+              placeholder="e.g. Thiruvallur"
+              className="w-full border border-cocoa/15 bg-shell px-3 py-2.5 text-sm text-cocoa outline-none focus:border-gold"
+              required
+            />
+          </label>
+
+          <label className="block">
+            <span className="block text-xs uppercase tracking-widest text-cocoa/60 mb-1.5">
+              Delivery Charge (₹)
+            </span>
+
+            <input
+              type="number"
+              min="0"
+              step="0.01"
+              value={form.flat_shipping_rate}
+              onChange={(e) =>
+                setForm((current) => ({
+                  ...current,
+                  flat_shipping_rate: e.target.value,
+                }))
+              }
+              placeholder="e.g. 1"
+              className="w-full border border-cocoa/15 bg-shell px-3 py-2.5 text-sm text-cocoa outline-none focus:border-gold"
+              required
+            />
+          </label>
+
+          <div className="flex justify-end gap-3 pt-3">
+            <button
+              type="button"
+              onClick={onClose}
+              className="px-4 py-2 text-xs uppercase tracking-widest border border-cocoa/15 text-cocoa hover:bg-sand"
+            >
+              Cancel
+            </button>
+
+            <button
+              type="submit"
+              disabled={saving}
+              className="px-5 py-2 text-xs uppercase tracking-widest bg-cocoa text-shell hover:opacity-90 disabled:opacity-50"
+            >
+              {saving ? "Saving..." : "Save"}
+            </button>
+          </div>
+        </form>
+      </motion.div>
+    </motion.div>
   );
 }
 
