@@ -49,7 +49,7 @@ async function getFolder(req) {
 
   const catalystApp = getCatalystApp(req);
 
-  return catalystApp.filestore().folder(folderId);
+  return catalystApp.filestore().folder(Number(folderId));
 }
 
 function sanitizeName(value) {
