@@ -214,10 +214,31 @@ https://paarajewellery.in
 async function processPayuCallback(payload, expectedStatus) {
   const config = getPayuConfig();
   const txnid = String(payload.txnid || '').trim();
-  if (!txnid || !payload.hash || !hashesMatch(
-    generateResponseHash(payload, config.salt),
-    payload.hash
-  )) {
+
+  const expectedHash = generateResponseHash(payload, config.salt);
+  const receivedHash = String(payload.hash || '').trim();
+
+  if (!txnid || !receivedHash || !hashesMatch(expectedHash, receivedHash)) {
+    console.error('[PAYU_RESPONSE_HASH_MISMATCH]', {
+      txnid: txnid || null,
+      status: payload.status || null,
+      amount: payload.amount || null,
+      keyMatches:
+        String(payload.key || '').trim() ===
+        String(config.key || '').trim(),
+      udf1: payload.udf1 || '',
+      udf2: payload.udf2 || '',
+      udf3: payload.udf3 || '',
+      udf4: payload.udf4 || '',
+      udf5: payload.udf5 || '',
+      hasAdditionalCharges:
+        Object.prototype.hasOwnProperty.call(payload, 'additional_charges'),
+      hasSplitInfo:
+        Object.prototype.hasOwnProperty.call(payload, 'splitInfo'),
+      expectedHashPrefix: expectedHash.slice(0, 12),
+      receivedHashPrefix: receivedHash.slice(0, 12),
+    });
+
     throw new Error('Invalid PayU response hash.');
   }
 
