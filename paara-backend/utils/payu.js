@@ -48,6 +48,15 @@ const generateResponseHash = (payload, salt) => {
   const values = [
     salt,
     payload.status || '',
+  ];
+
+  // PayU requires splitInfo here when it is present.
+  if (Object.prototype.hasOwnProperty.call(payload, 'splitInfo')) {
+    values.push(payload.splitInfo || '');
+  }
+
+  values.push(
+    '',
     '',
     '',
     '',
@@ -63,12 +72,15 @@ const generateResponseHash = (payload, salt) => {
     payload.amount || '',
     payload.txnid || '',
     payload.key || '',
-  ];
-
-  return sha512(
-    `${payload.additional_charges ? `${payload.additional_charges}|` : ''}${values.join('|')}`
   );
+
+  const prefix = payload.additional_charges
+    ? `${payload.additional_charges}|`
+    : '';
+
+  return sha512(`${prefix}${values.join('|')}`);
 };
+
 
 const hashesMatch = (expected, received) => {
   const expectedBuffer = Buffer.from(String(expected || '').toLowerCase());
