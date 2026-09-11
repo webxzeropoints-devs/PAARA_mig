@@ -3,7 +3,7 @@ const crypto = require('crypto');
 const PAYU_TEST_PAYMENT_URL = 'https://test.payu.in/_payment';
 const PAYU_TEST_VERIFY_URL = 'https://test.payu.in/merchant/postservice.php?form=2';
 const PAYU_PRODUCTION_PAYMENT_URL = 'https://secure.payu.in/_payment';
-const PAYU_PRODUCTION_VERIFY_URL = 'https://secure.payu.in/merchant/postservice.php?form=2';
+const PAYU_PRODUCTION_VERIFY_URL = 'https://info.payu.in/merchant/postservice.php?form=2';
 
 const getPayuConfig = () => {
   const key = String(process.env.PAYU_MERCHANT_KEY || '').trim();
