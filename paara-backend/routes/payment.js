@@ -411,6 +411,7 @@ const payuCallback = (expectedStatus) => async (req, res) => {
       error: error.message
     });
   }
+};
 
 const payuWebhook = async (req, res) => {
   try {
