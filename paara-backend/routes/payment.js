@@ -279,6 +279,7 @@ async function processPayuCallback(payload, expectedStatus) {
   
     try {
       await sendPaidInvoice(order.id);
+  
       console.log('[ORDER_CONFIRMATION_EMAIL_SENT]', {
         orderId: order.id,
       });
@@ -294,7 +295,7 @@ async function processPayuCallback(payload, expectedStatus) {
       orderId: order.id,
       paid: true,
       newlyPaid: true,
-      loyalty,
+      loyalty
     };
   }
   return { orderId: order.id, paid: true, newlyPaid: false };
@@ -372,16 +373,44 @@ const payuCallback = (expectedStatus) => async (req, res) => {
     redirectUrl.searchParams.set('payment', result.paid ? 'success' : 'failure');
     return res.redirect(303, redirectUrl.toString());
   } catch (error) {
-    console.error('[PAYU_CALLBACK_FAILED]', { message: maskSensitiveText(error.message), name: error.name });
+    console.error('[PAYU_CALLBACK_FAILED]', {
+      message: maskSensitiveText(error.message),
+      name: error.name
+    });
+  
     const frontendOrigin = getFrontendOrigin();
+  
     if (frontendOrigin) {
       const redirectUrl = new URL('/order-confirmation', frontendOrigin);
+  
+      const txnid = String(req.body?.txnid || '').trim();
+  
+      if (txnid) {
+        const orderResult = await db.query(
+          'SELECT id FROM orders WHERE payment_reference = $1 LIMIT 1',
+          [txnid]
+        );
+  
+        const orderId = orderResult.rows[0]?.id;
+  
+        if (orderId) {
+          redirectUrl.searchParams.set(
+            'order_id',
+            String(orderId)
+          );
+        }
+      }
+  
       redirectUrl.searchParams.set('payment', 'failure');
+  
       return res.redirect(303, redirectUrl.toString());
     }
-    return res.status(400).json({ received: false, error: error.message });
+  
+    return res.status(400).json({
+      received: false,
+      error: error.message
+    });
   }
-};
 
 const payuWebhook = async (req, res) => {
   try {
