@@ -64,6 +64,8 @@ async function markOrderPaid(orderId, paymentReference) {
   }
 }
 
+}
+
 async function sendPaidInvoice(orderId) {
   const { rows: orderRows } = await db.query(`
     SELECT o.*, c.email, c.name
