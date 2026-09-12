@@ -242,15 +242,45 @@ async function processPayuCallback(payload, expectedStatus) {
     throw new Error('Invalid PayU response hash.');
   }
 
+  const udfOrderId = Number.parseInt(String(payload.udf1 || '').trim(), 10);
+  
   const { rows } = await db.query(
-    'SELECT * FROM orders WHERE payment_reference = $1',
-    [txnid]
+    `
+      SELECT *
+      FROM orders
+      WHERE payment_reference = $1
+         OR ($2 > 0 AND id = $2)
+      ORDER BY
+        CASE WHEN payment_reference = $1 THEN 0 ELSE 1 END
+      LIMIT 1
+    `,
+    [txnid, udfOrderId]
   );
+  
   const order = rows[0];
-  if (!order) throw new Error('PayU transaction is not linked to an order.');
-  if (Number(payload.amount).toFixed(2) !== Number(order.total_amount).toFixed(2)) {
+  
+  if (!order) {
+    throw new Error('PayU transaction is not linked to an order.');
+  }
+  
+  if (
+    Number(payload.amount).toFixed(2) !==
+    Number(order.total_amount).toFixed(2)
+  ) {
     throw new Error('PayU amount mismatch.');
   }
+  
+  if (
+    String(order.payment_status || '').trim().toLowerCase() === 'paid'
+  ) {
+    return {
+      orderId: order.id,
+      paid: true,
+      newlyPaid: false,
+    };
+  }
+  
+
 
   if (String(payload.status || '').toLowerCase() !== expectedStatus) {
     await db.query(
@@ -307,8 +337,6 @@ async function processPayuCallback(payload, expectedStatus) {
     newlyPaid: true,
     loyalty,
   };
-}
-  return { orderId: order.id, paid: true, newlyPaid: false };
 }
 
 router.get('/config', requireAuth, (req, res) => {
@@ -374,54 +402,137 @@ const getFrontendOrigin = () => {
 };
 
 const payuCallback = (expectedStatus) => async (req, res) => {
+  let orderId = null;
+
   try {
-    const result = await processPayuCallback(req.body || {}, expectedStatus);
+    const payload = req.body || {};
+
+    const udfOrderId = Number.parseInt(
+      String(payload.udf1 || '').trim(),
+      10
+    );
+
+    if (Number.isInteger(udfOrderId) && udfOrderId > 0) {
+      orderId = udfOrderId;
+    }
+
+    const result = await processPayuCallback(
+      payload,
+      expectedStatus
+    );
+
+    orderId = result.orderId || orderId;
+
     const frontendOrigin = getFrontendOrigin();
-    if (!frontendOrigin) return res.json({ received: true, ...result });
-    const redirectUrl = new URL('/order-confirmation', frontendOrigin);
-    redirectUrl.searchParams.set('order_id', String(result.orderId));
-    redirectUrl.searchParams.set('payment', result.paid ? 'success' : 'failure');
-    return res.redirect(303, redirectUrl.toString());
+
+    if (!frontendOrigin) {
+      return res.json({
+        received: true,
+        ...result,
+      });
+    }
+
+    const redirectUrl = new URL(
+      '/order-confirmation',
+      frontendOrigin
+    );
+
+    redirectUrl.searchParams.set(
+      'order_id',
+      String(orderId)
+    );
+
+    redirectUrl.searchParams.set(
+      'payment',
+      result.paid ? 'success' : 'failure'
+    );
+
+    return res.redirect(
+      303,
+      redirectUrl.toString()
+    );
   } catch (error) {
     console.error('[PAYU_CALLBACK_FAILED]', {
       message: maskSensitiveText(error.message),
-      name: error.name
+      name: error.name,
+      orderId,
     });
-  
+
     const frontendOrigin = getFrontendOrigin();
-  
+
     if (frontendOrigin) {
-      const redirectUrl = new URL('/order-confirmation', frontendOrigin);
-  
-      const txnid = String(req.body?.txnid || '').trim();
-  
-      if (txnid) {
-        const orderResult = await db.query(
-          'SELECT id FROM orders WHERE payment_reference = $1 LIMIT 1',
-          [txnid]
-        );
-  
-        const orderId = orderResult.rows[0]?.id;
-  
-        if (orderId) {
-          redirectUrl.searchParams.set(
-            'order_id',
-            String(orderId)
+      const redirectUrl = new URL(
+        '/order-confirmation',
+        frontendOrigin
+      );
+
+      /*
+       * PayU sends our order ID in udf1.
+       * Use it as the primary recovery mechanism.
+       */
+      const payloadOrderId = Number.parseInt(
+        String(req.body?.udf1 || '').trim(),
+        10
+      );
+
+      if (
+        !orderId &&
+        Number.isInteger(payloadOrderId) &&
+        payloadOrderId > 0
+      ) {
+        orderId = payloadOrderId;
+      }
+
+      /*
+       * If udf1 is unavailable, try the transaction ID
+       * as a secondary fallback.
+       */
+      if (!orderId) {
+        const txnid = String(
+          req.body?.txnid || ''
+        ).trim();
+
+        if (txnid) {
+          const orderResult = await db.query(
+            `
+              SELECT id
+              FROM orders
+              WHERE payment_reference = $1
+              LIMIT 1
+            `,
+            [txnid]
           );
+
+          orderId = orderResult.rows[0]?.id || null;
         }
       }
-  
-      redirectUrl.searchParams.set('payment', 'failure');
-  
-      return res.redirect(303, redirectUrl.toString());
+
+      if (orderId) {
+        redirectUrl.searchParams.set(
+          'order_id',
+          String(orderId)
+        );
+      }
+
+      redirectUrl.searchParams.set(
+        'payment',
+        'failure'
+      );
+
+      return res.redirect(
+        303,
+        redirectUrl.toString()
+      );
     }
-  
+
     return res.status(400).json({
       received: false,
-      error: error.message
+      error: error.message,
     });
   }
 };
+  
+
 
 const payuWebhook = async (req, res) => {
   try {
