@@ -75,6 +75,17 @@ export default function Collections() {
     getCategories().then((data) => setCategories(Array.isArray(data) ? data : [])).catch(() => setCategories([]));
   }, []);
 
+  useEffect(() => {
+  if (!mobileFiltersOpen) return;
+
+  const originalOverflow = document.body.style.overflow;
+  document.body.style.overflow = "hidden";
+
+  return () => {
+    document.body.style.overflow = originalOverflow;
+  };
+}, [mobileFiltersOpen]);
+
   const setFilter = (key, value) => {
     const next = new URLSearchParams(params);
     if (value) next.set(key, value);
