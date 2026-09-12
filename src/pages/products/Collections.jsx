@@ -219,115 +219,10 @@ export default function Collections() {
                     </option>
                   ))}
                 </select>
+                </div>
               </div>
             
-              {mobileFiltersOpen && mobileDraft && (
-                <div className="mt-3 rounded-sm border border-cocoa/10 bg-shell p-4">
-                  <div className="mb-4 flex items-center justify-between">
-                    <h2 className="font-display text-xl">Filters</h2>
-            
-                    <button
-                      type="button"
-                      onClick={closeMobileFilters}
-                      aria-label="Close filters"
-                      className="rounded-full p-2 text-cocoa/60 hover:bg-sand"
-                    >
-                      <X size={18} />
-                    </button>
-                  </div>
-            
-                  <FilterGroup
-                    label="Gender"
-                    value={mobileDraft.gender}
-                    options={GENDERS}
-                    onChange={(value) =>
-                      setMobileDraft((current) => ({
-                        ...current,
-                        gender: value,
-                      }))
-                    }
-                  />
-            
-                  <FilterGroup
-                    label="Material"
-                    value={mobileDraft.material}
-                    options={MATERIALS}
-                    onChange={(value) =>
-                      setMobileDraft((current) => ({
-                        ...current,
-                        material: value,
-                      }))
-                    }
-                  />
-            
-                  <FilterGroup
-                    label="Vibe"
-                    value={mobileDraft.vibe}
-                    options={VIBES}
-                    onChange={(value) =>
-                      setMobileDraft((current) => ({
-                        ...current,
-                        vibe: value,
-                      }))
-                    }
-                  />
-            
-                  <SelectFilter
-                    label="Collection"
-                    value={mobileDraft.category}
-                    options={categories}
-                    onChange={(value) =>
-                      setMobileDraft((current) => ({
-                        ...current,
-                        category: value,
-                        subcategory: "",
-                      }))
-                    }
-                  />
-            
-                  <div className="mt-4">
-                    <p className="mb-2 text-xs font-semibold uppercase tracking-widest text-cocoa/60">
-                      Sort
-                    </p>
-            
-                    <select
-                      value={mobileDraft.sort}
-                      onChange={(event) =>
-                        setMobileDraft((current) => ({
-                          ...current,
-                          sort: event.target.value,
-                        }))
-                      }
-                      className="w-full border-b border-cocoa/30 bg-transparent py-2 text-sm font-semibold outline-none focus:border-gold"
-                    >
-                      {SORTS.map((sort) => (
-                        <option key={sort.value} value={sort.value}>
-                          {sort.label}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-            
-                  <div className="mt-6 flex gap-3 border-t border-cocoa/10 pt-4">
-                    <button
-                      type="button"
-                      onClick={clearMobileFilters}
-                      className="flex-1 border border-cocoa/20 px-4 py-3 text-xs uppercase tracking-widest text-cocoa/70"
-                    >
-                      Clear All
-                    </button>
-            
-                    <button
-                      type="button"
-                      onClick={applyMobileFilters}
-                      className="flex-1 bg-gold px-4 py-3 text-xs uppercase tracking-widest text-white hover:bg-cocoa"
-                    >
-                      Apply Filters
-                    </button>
-                  </div>
-                </div>
-              )}
-            </div>
+
             {error && (
               <div className="text-xs text-red-700 bg-red-50 border border-red-100 px-3 py-2 rounded-sm mb-6">
                 {error}
@@ -368,14 +263,7 @@ export default function Collections() {
         </div>
       </div>
       {mobileFiltersOpen && mobileDraft && (
-        <div
-          className="fixed inset-0 z-50 flex items-end bg-cocoa/40 md:hidden"
-          onClick={(event) => {
-            if (event.target === event.currentTarget) {
-              closeMobileFilters();
-            }
-          }}
-        >
+        <div className="fixed inset-0 z-50 flex items-end bg-cocoa/40 md:hidden">
           <div
             role="dialog"
             aria-modal="true"
@@ -421,6 +309,7 @@ function FilterGroup({ label, value, options, onChange }) {
       <div className="flex flex-wrap gap-2">
         {options.map((opt) => (
           <button
+            type="button"
             key={opt}
             onClick={() => onChange(value === opt ? "" : opt)}
             className={`text-xs uppercase tracking-widest px-3 py-1 rounded-sm border transition-colors font-semibold ${
