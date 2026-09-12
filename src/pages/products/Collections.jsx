@@ -390,6 +390,9 @@ export default function Collections() {
         </div>,
         document.body
       )}
+    </div>
+  );
+}
 
 function FilterGroup({ label, value, options, onChange }) {
   return (
