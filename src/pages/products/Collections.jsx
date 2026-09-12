@@ -368,13 +368,19 @@ export default function Collections() {
         </div>
       </div>
       {mobileFiltersOpen && mobileDraft && (
-        <div className="fixed inset-0 z-50 flex items-end bg-cocoa/40 md:hidden" onClick={closeMobileFilters}>
+        <div
+          className="fixed inset-0 z-50 flex items-end bg-cocoa/40 md:hidden"
+          onClick={(event) => {
+            if (event.target === event.currentTarget) {
+              closeMobileFilters();
+            }
+          }}
+        >
           <div
             role="dialog"
             aria-modal="true"
             aria-label="Product filters"
             className="max-h-[85vh] w-full overflow-y-auto rounded-t-2xl bg-shell p-5 shadow-2xl"
-            onClick={(event) => event.stopPropagation()}
           >
             <div className="mb-4 flex items-center justify-between">
               <h2 className="font-display text-2xl">Filters</h2>
