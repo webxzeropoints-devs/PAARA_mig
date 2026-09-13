@@ -183,19 +183,11 @@ CREATE TABLE IF NOT EXISTS loyalty_reward_redemptions (
 CREATE INDEX IF NOT EXISTS idx_loyalty_reward_redemptions_customer
 ON loyalty_reward_redemptions(customer_id, redeemed_at);
 
-CREATE INDEX IF NOT EXISTS idx_loyalty_stamps_customer ON loyalty_stamps(customer_id, awarded_at);
+CREATE INDEX IF NOT EXISTS idx_loyalty_stamps_customer
+ON loyalty_stamps(customer_id, awarded_at);
 
-CREATE TABLE IF NOT EXISTS loyalty_reward_redemptions (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  customer_id INTEGER NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
-  redeemed_at TEXT NOT NULL DEFAULT (datetime('now'))
-);
-
-CREATE INDEX IF NOT EXISTS idx_loyalty_reward_redemptions_customer
-  ON loyalty_reward_redemptions(customer_id, redeemed_at);
-
-CREATE INDEX IF NOT EXISTS idx_order_items_order ON order_items(order_id);
-CREATE INDEX IF NOT EXISTS idx_order_items_order ON order_items(order_id);
+CREATE INDEX IF NOT EXISTS idx_order_items_order
+ON order_items(order_id);
 
 CREATE TABLE IF NOT EXISTS gift_card_rules (
   id               INTEGER PRIMARY KEY AUTOINCREMENT,
