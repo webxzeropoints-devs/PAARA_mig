@@ -35,6 +35,17 @@ const getLocalDateTimeInputValue = () => {
   return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}T${pad(now.getHours())}:${pad(now.getMinutes())}`;
 };
 
+const normalizeOptionList = (value) => {
+  if (Array.isArray(value)) return value;
+  if (!value) return [];
+  try {
+    const parsed = JSON.parse(value);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return String(value).split(",").map((item) => item.trim()).filter(Boolean);
+  }
+};
+
 function Section({ title, subtitle, action, children }) {
   return (
     <section className="mb-10">
@@ -993,8 +1004,8 @@ function ProductEditor({ product, categories, onClose, onSaved }) {
           price: product.price,
           gender: product.gender || "women",
           vibe: product.vibe || "",
-          shopFor: Array.isArray(product.shopFor) ? product.shopFor : [],
-          features: Array.isArray(product.features) ? product.features : [],
+          shopFor: normalizeOptionList(product.shopFor),
+          features: normalizeOptionList(product.features),
           subcategory: product.subcategory || "",
           stock: product.stock ?? 0,
           is_exclusive: toBoolean(product.is_exclusive),
