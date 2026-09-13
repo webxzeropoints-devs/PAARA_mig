@@ -1,6 +1,6 @@
 const db = require('../db/database.pg');
 
-const THRESHOLD = 599;
+const THRESHOLD = 19;
 const CARD_SIZE = 6;
 const VALIDITY_MONTHS = 6;
 
