@@ -174,6 +174,15 @@ CREATE TABLE IF NOT EXISTS loyalty_stamps (
   animation_shown_at TEXT
 );
 
+CREATE TABLE IF NOT EXISTS loyalty_reward_redemptions (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  customer_id INTEGER NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
+  redeemed_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_loyalty_reward_redemptions_customer
+ON loyalty_reward_redemptions(customer_id, redeemed_at);
+
 CREATE INDEX IF NOT EXISTS idx_loyalty_stamps_customer ON loyalty_stamps(customer_id, awarded_at);
 
 CREATE TABLE IF NOT EXISTS loyalty_reward_redemptions (
