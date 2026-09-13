@@ -25,7 +25,17 @@ async function ensurePaaraStoryTable() {
       created_at TEXT NOT NULL DEFAULT to_char(CURRENT_TIMESTAMP, 'YYYY-MM-DD HH24:MI:SS'),
       updated_at TEXT NOT NULL DEFAULT to_char(CURRENT_TIMESTAMP, 'YYYY-MM-DD HH24:MI:SS'),
       CONSTRAINT paara_story_pkey PRIMARY KEY (id)
-    `);
+    );
+
+    INSERT INTO paara_story (id, title, description)
+    VALUES (
+      1,
+      'A dream shaped by fashion. A brand built with purpose.',
+      'Paara Jewellery was founded by Dharshini, born from her lifelong love for fashion, styling, and the beauty found in intricate details.'
+    )
+    ON CONFLICT (id) DO NOTHING;
+  `);
+}
 
 async function ensureLoyaltyRewardRedemptionsTable() {
   await pool.query(`
@@ -38,7 +48,7 @@ async function ensureLoyaltyRewardRedemptionsTable() {
     CREATE INDEX IF NOT EXISTS idx_loyalty_reward_redemptions_customer
       ON loyalty_reward_redemptions(customer_id, redeemed_at);
   `);
-}  
+}
 
     INSERT INTO paara_story (id, title, description)
     VALUES (
