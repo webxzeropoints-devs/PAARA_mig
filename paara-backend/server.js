@@ -371,18 +371,17 @@ if (db.isServerless) {
 
   const server = app.listen(PORT, async () => {
     console.log(`Paara backend running on http://localhost:${PORT}`);
-
+  
     try {
       await db.ensurePaaraStoryTable();
       console.log('[DB] Paara Story table verified.');
-    
+  
       await db.ensureLoyaltyRewardRedemptionsTable();
       console.log('[DB] Loyalty reward redemptions table verified.');
     } catch (error) {
       console.error('[DB] Failed to initialize database tables:', error.message);
     }
   });
-
   server.on('error', (e) => {
     if (e.code === 'EADDRINUSE') {
       console.error(`Port ${PORT} is already in use. Stop the process using that port, then restart Paara.`);
