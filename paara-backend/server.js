@@ -375,8 +375,11 @@ if (db.isServerless) {
     try {
       await db.ensurePaaraStoryTable();
       console.log('[DB] Paara Story table verified.');
+    
+      await db.ensureLoyaltyRewardRedemptionsTable();
+      console.log('[DB] Loyalty reward redemptions table verified.');
     } catch (error) {
-      console.error('[DB] Failed to initialize Paara Story table:', error.message);
+      console.error('[DB] Failed to initialize database tables:', error.message);
     }
   });
 
