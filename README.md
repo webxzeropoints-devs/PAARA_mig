@@ -2,7 +2,7 @@
 
 ## Local development
 
-The project contains two applications:
+The project contains two applications;
 
 - Frontend: this repository root (Vite/React), normally available at `http://localhost:5173`.
 - Backend: [`paara-backend`](./paara-backend) (Express/SQLite), available at `http://localhost:4000`.

@@ -1,0 +1,50 @@
+name: Build Paara AppSail
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: paara-backend
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20.20.2'
+          cache: 'npm'
+          cache-dependency-path: paara-backend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Validate backend
+        run: |
+          node --version
+          npm --version
+          node --check server.js
+          test -f node_modules/dotenv/package.json
+          test -f node_modules/zcatalyst-sdk-node/package.json
+          test -f node_modules/better-sqlite3/package.json
+
+      - name: Create AppSail ZIP
+        run: |
+          zip -r ../paara-backend-appsail.zip . \
+            -x ".env" \
+            -x ".git/*" \
+            -x "node_modules/.cache/*" \
+            -x "*.backup.js"
+
+      - name: Upload AppSail ZIP
+        uses: actions/upload-artifact@v4
+        with:
+          name: paara-backend-appsail
+          path: paara-backend-appsail.zip
+          retention-days: 7[

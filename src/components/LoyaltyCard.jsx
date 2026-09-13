@@ -83,7 +83,7 @@ export default function LoyaltyCard({ stampsCount = 0, animateStamps = false, st
           <div className="paara-left">
             <div className="paara-brand">Paara<span style={{ fontSize: "60%" }}>.</span></div>
             <div className="paara-title-row"><span className="paara-diamond">✦</span><span className="paara-title">REWARDS CARD</span><span className="paara-diamond">✦</span></div>
-            <div className="paara-sub">Spend <b>₹599</b> or more and earn 1 stamp</div>
+            <div className="paara-sub">Spend <b>₹19</b> or more and earn 1 stamp</div>
             <div className="paara-hearts">
               {Array.from({ length: 6 }, (_, index) => {
                 const stamped = index < count;

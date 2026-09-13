@@ -11,6 +11,9 @@ const express = require('express');
 const rateLimit = require('express-rate-limit');
 const multer = require('multer');
 const path = require('path');
+const fs = require('fs');
+const os = require('os');
+const crypto = require('crypto');
 const db = require('./db/database.pg');
 const { requireAdminSession } = require('./middleware/adminAuth');
 const { maskSensitiveText } = require('./utils/validate');
@@ -113,20 +116,52 @@ app.use((req, res, next) => {
 
 // Serve the shared public assets used by the storefront and local upload files.
 app.use('/images', express.static(path.join(__dirname, '..', 'public', 'images')));
-app.get('/media/:fileId', async (req, res) => {
-  const fileId = String(req.params.fileId || '').trim();
-  if (!/^[A-Za-z0-9_-]+$/.test(fileId)) return res.status(404).end();
+
+app.get('/media/*', async (req, res) => {
+  const rawObjectKey = String(req.params[0] || '').trim();
+
+  if (!rawObjectKey) {
+    return res.status(404).end();
+  }
+
   try {
-    const media = await mediaStore.download(`catalyst-file:${fileId}`);
-    if (!media) return res.status(404).end();
+    const objectKey = decodeURIComponent(rawObjectKey);
+
+    // Prevent path traversal.
+    if (!objectKey || objectKey.includes('..')) {
+      return res.status(404).end();
+    }
+
+    const media = await mediaStore.download(
+      `stratus:${objectKey}`,
+      req
+    );
+
+    if (!media) {
+      return res.status(404).end();
+    }
+
     res.set('Content-Type', media.contentType);
     res.set('Content-Length', String(media.buffer.length));
+
     return res.end(media.buffer);
   } catch (error) {
-    console.error('[MEDIA_DOWNLOAD_FAILED]', { fileId, message: error.message, code: error.code });
-    return res.status(error.code === 'MEDIA_STORAGE_NOT_CONFIGURED' ? 503 : 404).end();
+    console.error('[MEDIA_DOWNLOAD_FAILED]', {
+      objectKey: rawObjectKey,
+      message: error.message,
+      code: error.code,
+    });
+
+    return res
+      .status(
+        error.code === 'MEDIA_STORAGE_NOT_CONFIGURED'
+          ? 503
+          : 404
+      )
+      .end();
   }
 });
+
 app.get('/images/blob/*', async (req, res) => {
   try {
     const pathname = decodeURIComponent(req.params[0] || '');
@@ -288,6 +323,7 @@ app.get('/api/db-status', requireAdminSession, (req, res) => {
 
 app.get('/api/health', (req, res) => res.json({ ok: true }));
 
+
 // Central error handler
 app.use((err, req, res, next) => {
   console.error('[REQUEST_ERROR]', {
@@ -332,8 +368,20 @@ if (db.isServerless) {
   module.exports = app;
 } else {
   const PORT = process.env.X_ZOHO_CATALYST_LISTEN_PORT || process.env.PORT || 4000;
-  const server = app.listen(PORT, () => console.log(`Paara backend running on http://localhost:${PORT}`));
 
+  const server = app.listen(PORT, async () => {
+    console.log(`Paara backend running on http://localhost:${PORT}`);
+  
+    try {
+      await db.ensurePaaraStoryTable();
+      console.log('[DB] Paara Story table verified.');
+  
+      await db.ensureLoyaltyRewardRedemptionsTable();
+      console.log('[DB] Loyalty reward redemptions table verified.');
+    } catch (error) {
+      console.error('[DB] Failed to initialize database tables:', error.message);
+    }
+  });
   server.on('error', (e) => {
     if (e.code === 'EADDRINUSE') {
       console.error(`Port ${PORT} is already in use. Stop the process using that port, then restart Paara.`);

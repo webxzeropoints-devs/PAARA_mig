@@ -55,7 +55,7 @@ export default function Orders() {
       .then((data) => {
         if (cancelled) return;
         const customerOrders = Array.isArray(data) ? data : data?.orders || [];
-        setOrders(customerOrders.filter((order) => String(order.status || "").trim().toLowerCase() === "delivered"));
+        setOrders(customerOrders);
       })
       .catch((err) => {
         if (cancelled) return;

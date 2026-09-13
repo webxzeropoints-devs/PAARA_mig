@@ -35,7 +35,7 @@ export default function LoyaltyCardPage() {
   };
 
   return (
-    <AccountPageLayout title="Loyalty Card" subtitle="Earn one stamp on each qualifying delivered order of ₹599 or more.">
+    <AccountPageLayout title="Loyalty Card" subtitle="Earn one stamp on each qualifying delivered order of ₹19 or more.">
       <Seo title="Loyalty Card" description="View your PAARA Jewellery Loyalty Card and server-synced stamps." />
       {error && <p className="mb-5 bg-red-50 px-4 py-3 text-xs text-red-700">{error}</p>}
       <div className="space-y-6">

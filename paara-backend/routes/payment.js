@@ -71,66 +71,216 @@ async function sendPaidInvoice(orderId) {
     JOIN customers c ON c.id = o.customer_id
     WHERE o.id = $1
   `, [orderId]);
+
   const order = orderRows[0];
-  if (!order) return;
+
+  if (!order || !order.email) {
+    console.error('[ORDER_CONFIRMATION_EMAIL_SKIPPED]', {
+      orderId,
+      reason: !order
+        ? 'Order not found.'
+        : 'Customer email address is missing.',
+    });
+    return;
+  }
 
   const { rows: items } = await db.query(
     'SELECT * FROM order_items WHERE order_id = $1 ORDER BY id ASC',
     [orderId]
   );
+
   const { rows: addressRows } = await db.query(
     'SELECT * FROM addresses WHERE id = $1 AND customer_id = $2',
     [order.address_id, order.customer_id]
   );
+
   const address = addressRows[0];
+
   const pdf = await createInvoicePdf(order, items, address);
+
+  const orderDate = order.created_at
+    ? new Date(order.created_at).toLocaleString('en-IN', {
+        dateStyle: 'medium',
+        timeStyle: 'short',
+      })
+    : new Date().toLocaleString('en-IN', {
+        dateStyle: 'medium',
+        timeStyle: 'short',
+      });
+
   const itemLines = items
-    .map((item) => `${item.product_name} x ${item.quantity} @ INR ${item.unit_price} = INR ${item.line_total}`)
-    .join('\n');
+    .map((item, index) => {
+      const unitPrice = Number(item.unit_price || 0).toLocaleString('en-IN', {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+      });
+
+      const lineTotal = Number(item.line_total || 0).toLocaleString('en-IN', {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+      });
+
+      return [
+        `${index + 1}. ${item.product_name}`,
+        `   Quantity: ${item.quantity}`,
+        `   Unit Price: INR ${unitPrice}`,
+        `   Item Total: INR ${lineTotal}`,
+      ].join('\n');
+    })
+    .join('\n\n');
+
   const addressText = address
-    ? `${address.line1}, ${address.city}, ${address.state} - ${address.pincode}`
+    ? [
+        address.line1,
+        address.line2,
+        address.city,
+        address.state,
+        address.pincode,
+        'India',
+      ]
+        .filter(Boolean)
+        .join(', ')
     : 'Not available';
 
-  await trySendEmail({
-    to: order.email,
-    subject: `Paara invoice for order ${order.order_number}`,
-    text: `Order ID: ${order.order_number}
-Payment Reference: ${order.payment_reference}
+  const subtotal = Number(order.subtotal || 0).toLocaleString('en-IN', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
 
-Items:
+  const shipping = Number(order.shipping_amount || 0).toLocaleString('en-IN', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+
+  const total = Number(order.total_amount || 0).toLocaleString('en-IN', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+
+  await trySendEmail(
+    {
+      to: order.email,
+      subject: `Order confirmed — ${order.order_number || `Order ${order.id}`}`,
+      text: `Hi ${order.name || 'Customer'},
+
+Thank you for shopping with Paara Jewellery.
+
+Your payment has been successfully received and your order has been confirmed.
+
+ORDER DETAILS
+-------------
+Order ID: ${order.order_number || order.id}
+Order Date: ${orderDate}
+Payment Method: ${order.payment_method || 'PayU'}
+Payment Status: ${order.payment_status || 'paid'}
+Payment Reference: ${order.payment_reference || 'Not available'}
+
+ITEMS PURCHASED
+---------------
 ${itemLines}
 
-Taxes: Included in product prices
-Shipping: INR ${order.shipping_amount}
-Total: INR ${order.total_amount}
-Shipping address: ${addressText}`,
-    attachments: [{
-      filename: `paara-invoice-${order.order_number}.pdf`,
-      content: pdf,
-      contentType: 'application/pdf',
-    }],
-  }, `invoice for order ${order.order_number}`);
+ORDER TOTAL
+-----------
+Subtotal: INR ${subtotal}
+Delivery Charge: INR ${shipping}
+Total Paid: INR ${total}
+
+DELIVERY ADDRESS
+----------------
+${addressText}
+
+Your official invoice is attached to this email as a PDF.
+
+You can also view your order from your Paara Jewellery account.
+
+Thank you for choosing Paara Jewellery.
+
+Warm regards,
+Paara Jewellery
+https://paarajewellery.in
+`,
+      attachments: [
+        {
+          filename: `paara-invoice-${order.order_number || order.id}.pdf`,
+          content: pdf,
+          contentType: 'application/pdf',
+        },
+      ],
+    },
+    `order confirmation email for ${order.order_number || order.id}`
+  );
 }
 
 async function processPayuCallback(payload, expectedStatus) {
   const config = getPayuConfig();
   const txnid = String(payload.txnid || '').trim();
-  if (!txnid || !payload.hash || !hashesMatch(
-    generateResponseHash(payload, config.salt),
-    payload.hash
-  )) {
+
+  const expectedHash = generateResponseHash(payload, config.salt);
+  const receivedHash = String(payload.hash || '').trim();
+
+  if (!txnid || !receivedHash || !hashesMatch(expectedHash, receivedHash)) {
+    console.error('[PAYU_RESPONSE_HASH_MISMATCH]', {
+      txnid: txnid || null,
+      status: payload.status || null,
+      amount: payload.amount || null,
+      keyMatches:
+        String(payload.key || '').trim() ===
+        String(config.key || '').trim(),
+      udf1: payload.udf1 || '',
+      udf2: payload.udf2 || '',
+      udf3: payload.udf3 || '',
+      udf4: payload.udf4 || '',
+      udf5: payload.udf5 || '',
+      hasAdditionalCharges:
+        Object.prototype.hasOwnProperty.call(payload, 'additional_charges'),
+      hasSplitInfo:
+        Object.prototype.hasOwnProperty.call(payload, 'splitInfo'),
+      expectedHashPrefix: expectedHash.slice(0, 12),
+      receivedHashPrefix: receivedHash.slice(0, 12),
+    });
+
     throw new Error('Invalid PayU response hash.');
   }
 
+  const udfOrderId = Number.parseInt(String(payload.udf1 || '').trim(), 10);
+  
   const { rows } = await db.query(
-    'SELECT * FROM orders WHERE payment_reference = $1',
-    [txnid]
+    `
+      SELECT *
+      FROM orders
+      WHERE payment_reference = $1
+         OR ($2 > 0 AND id = $2)
+      ORDER BY
+        CASE WHEN payment_reference = $1 THEN 0 ELSE 1 END
+      LIMIT 1
+    `,
+    [txnid, udfOrderId]
   );
+  
   const order = rows[0];
-  if (!order) throw new Error('PayU transaction is not linked to an order.');
-  if (Number(payload.amount).toFixed(2) !== Number(order.total_amount).toFixed(2)) {
+  
+  if (!order) {
+    throw new Error('PayU transaction is not linked to an order.');
+  }
+  
+  if (
+    Number(payload.amount).toFixed(2) !==
+    Number(order.total_amount).toFixed(2)
+  ) {
     throw new Error('PayU amount mismatch.');
   }
+  
+  if (
+    String(order.payment_status || '').trim().toLowerCase() === 'paid'
+  ) {
+    return {
+      orderId: order.id,
+      paid: true,
+      newlyPaid: false,
+    };
+  }
+  
+
 
   if (String(payload.status || '').toLowerCase() !== expectedStatus) {
     await db.query(
@@ -151,18 +301,51 @@ async function processPayuCallback(payload, expectedStatus) {
 
   const reference = String(details.mihpayid || payload.mihpayid || txnid);
   const newlyPaid = await markOrderPaid(order.id, reference);
+
   if (newlyPaid) {
-    const loyalty = await processLoyaltyOrder(order.id, order.customer_id);
-    sendPaidInvoice(order.id).catch((error) => {
-      console.error('[INVOICE_EMAIL_FAILED]', {
+    let loyalty = null;
+
+    try {
+      loyalty = await processLoyaltyOrder(
+        order.id,
+        order.customer_id
+      );
+    } catch (error) {
+      console.error('[LOYALTY_PROCESSING_FAILED]', {
+        orderId: order.id,
         message: maskSensitiveText(error.message),
         name: error.name,
       });
-    });
-    return { orderId: order.id, paid: true, newlyPaid: true, loyalty };
+    }
+
+    try {
+      await sendPaidInvoice(order.id);
+
+      console.log('[ORDER_CONFIRMATION_EMAIL_SENT]', {
+        orderId: order.id,
+      });
+    } catch (error) {
+      console.error('[INVOICE_EMAIL_FAILED]', {
+        orderId: order.id,
+        message: maskSensitiveText(error.message),
+        name: error.name,
+      });
+    }
+
+    return {
+      orderId: order.id,
+      paid: true,
+      newlyPaid: true,
+      loyalty,
+    };
   }
-  return { orderId: order.id, paid: true, newlyPaid: false };
-}
+
+  return {
+    orderId: order.id,
+    paid: true,
+    newlyPaid: false,
+  };
+} // closes processPayuCallback
 
 router.get('/config', requireAuth, (req, res) => {
   const config = getPayuConfig();
@@ -227,25 +410,137 @@ const getFrontendOrigin = () => {
 };
 
 const payuCallback = (expectedStatus) => async (req, res) => {
+  let orderId = null;
+
   try {
-    const result = await processPayuCallback(req.body || {}, expectedStatus);
-    const frontendOrigin = getFrontendOrigin();
-    if (!frontendOrigin) return res.json({ received: true, ...result });
-    const redirectUrl = new URL('/order-confirmation', frontendOrigin);
-    redirectUrl.searchParams.set('order_id', String(result.orderId));
-    redirectUrl.searchParams.set('payment', result.paid ? 'success' : 'failure');
-    return res.redirect(303, redirectUrl.toString());
-  } catch (error) {
-    console.error('[PAYU_CALLBACK_FAILED]', { message: maskSensitiveText(error.message), name: error.name });
-    const frontendOrigin = getFrontendOrigin();
-    if (frontendOrigin) {
-      const redirectUrl = new URL('/order-confirmation', frontendOrigin);
-      redirectUrl.searchParams.set('payment', 'failure');
-      return res.redirect(303, redirectUrl.toString());
+    const payload = req.body || {};
+
+    const udfOrderId = Number.parseInt(
+      String(payload.udf1 || '').trim(),
+      10
+    );
+
+    if (Number.isInteger(udfOrderId) && udfOrderId > 0) {
+      orderId = udfOrderId;
     }
-    return res.status(400).json({ received: false, error: error.message });
+
+    const result = await processPayuCallback(
+      payload,
+      expectedStatus
+    );
+
+    orderId = result.orderId || orderId;
+
+    const frontendOrigin = getFrontendOrigin();
+
+    if (!frontendOrigin) {
+      return res.json({
+        received: true,
+        ...result,
+      });
+    }
+
+    const redirectUrl = new URL(
+      '/order-confirmation',
+      frontendOrigin
+    );
+
+    redirectUrl.searchParams.set(
+      'order_id',
+      String(orderId)
+    );
+
+    redirectUrl.searchParams.set(
+      'payment',
+      result.paid ? 'success' : 'failure'
+    );
+
+    return res.redirect(
+      303,
+      redirectUrl.toString()
+    );
+  } catch (error) {
+    console.error('[PAYU_CALLBACK_FAILED]', {
+      message: maskSensitiveText(error.message),
+      name: error.name,
+      orderId,
+    });
+
+    const frontendOrigin = getFrontendOrigin();
+
+    if (frontendOrigin) {
+      const redirectUrl = new URL(
+        '/order-confirmation',
+        frontendOrigin
+      );
+
+      /*
+       * PayU sends our order ID in udf1.
+       * Use it as the primary recovery mechanism.
+       */
+      const payloadOrderId = Number.parseInt(
+        String(req.body?.udf1 || '').trim(),
+        10
+      );
+
+      if (
+        !orderId &&
+        Number.isInteger(payloadOrderId) &&
+        payloadOrderId > 0
+      ) {
+        orderId = payloadOrderId;
+      }
+
+      /*
+       * If udf1 is unavailable, try the transaction ID
+       * as a secondary fallback.
+       */
+      if (!orderId) {
+        const txnid = String(
+          req.body?.txnid || ''
+        ).trim();
+
+        if (txnid) {
+          const orderResult = await db.query(
+            `
+              SELECT id
+              FROM orders
+              WHERE payment_reference = $1
+              LIMIT 1
+            `,
+            [txnid]
+          );
+
+          orderId = orderResult.rows[0]?.id || null;
+        }
+      }
+
+      if (orderId) {
+        redirectUrl.searchParams.set(
+          'order_id',
+          String(orderId)
+        );
+      }
+
+      redirectUrl.searchParams.set(
+        'payment',
+        'failure'
+      );
+
+      return res.redirect(
+        303,
+        redirectUrl.toString()
+      );
+    }
+
+    return res.status(400).json({
+      received: false,
+      error: error.message,
+    });
   }
 };
+  
+
 
 const payuWebhook = async (req, res) => {
   try {

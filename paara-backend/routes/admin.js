@@ -36,8 +36,24 @@ const safeUploadError = (error) => ({
   meta: error?.meta,
 });
 
-const deleteIfUnreferenced = async (references) => {
-  for (const reference of new Set(references.filter(mediaStore.isCatalystReference))) {
+const deleteIfUnreferenced = async (references, req) => {
+  const isManagedReference = (reference) => {
+    if (typeof mediaStore.isStratusReference === 'function') {
+      return mediaStore.isStratusReference(reference);
+    }
+
+    if (typeof mediaStore.isCatalystReference === 'function') {
+      return mediaStore.isCatalystReference(reference);
+    }
+
+    return false;
+  };
+
+  for (
+    const reference of new Set(
+      references.filter(isManagedReference)
+    )
+  ) {
     const result = await db.query(`
       SELECT 1 FROM product_images WHERE image_url = $1
       UNION ALL SELECT 1 FROM instagram_reviews WHERE image_url = $1
@@ -46,7 +62,10 @@ const deleteIfUnreferenced = async (references) => {
       UNION ALL SELECT 1 FROM admins WHERE profile_image_url = $1
       LIMIT 1
     `, [reference]);
-    if (result.rowCount === 0) await mediaStore.deleteReference(reference);
+
+    if (result.rowCount === 0) {
+      await mediaStore.deleteReference(reference, req);
+    }
   }
 };
 
@@ -115,21 +134,34 @@ const orderedImageUrls = ({ uploadedImages, existingImages, uploadSlots, existin
   return [...slots.entries()].sort(([left], [right]) => left - right).map(([, url]) => url);
 };
 
-const saveUploadedImages = async (files) => {
+const saveUploadedImages = async (files, req) => {
   if (!files || files.length === 0) return [];
+
   const uploaded = [];
+
   try {
-    for (const file of files) uploaded.push(await mediaStore.uploadImage(file, 'product'));
+    for (const file of files) {
+      uploaded.push(
+        await mediaStore.uploadImage(file, 'product', req)
+      );
+    }
+
     return uploaded.map((item) => item.reference);
   } catch (error) {
-    await Promise.allSettled(uploaded.map((item) => mediaStore.deleteReference(item.reference)));
+    await Promise.allSettled(
+      uploaded.map((item) =>
+        mediaStore.deleteReference(item.reference, req)
+      )
+    );
+
     throw error;
   }
 };
 
-const saveUploadedImage = async (file, prefix) => {
+
+const saveUploadedImage = async (file, prefix, req) => {
   if (!file) return null;
-  const uploaded = await mediaStore.uploadImage(file, prefix);
+  const uploaded = await mediaStore.uploadImage(file, prefix, req);
   return uploaded.reference;
 };
 
@@ -288,6 +320,149 @@ router.delete('/categories/:id', async (q, s) => {
     console.error('[ADMIN_CATEGORY_DELETE_FAILED]', error.message);
     return s.status(400).json({
       error: 'Could not delete the category.',
+    });
+  }
+});
+
+// -----------------------------
+// Shipping Charges
+// -----------------------------
+
+router.get('/shipping', async (q, s) => {
+  try {
+    const result = await db.query(`
+      SELECT id, name, flat_shipping_rate
+      FROM cities
+      ORDER BY LOWER(name) ASC
+    `);
+
+    return s.json(result.rows);
+  } catch (error) {
+    console.error('[ADMIN_SHIPPING_LIST_FAILED]', error.message);
+    return s.status(500).json({
+      error: 'Could not load shipping charges.',
+    });
+  }
+});
+
+router.post('/shipping', async (q, s) => {
+  try {
+    const name = String(q.body?.name || '').trim();
+    const rate = Number(q.body?.flat_shipping_rate);
+
+    if (!name) {
+      return s.status(400).json({
+        error: 'District or city name is required.',
+      });
+    }
+
+    if (!Number.isFinite(rate) || rate < 0) {
+      return s.status(400).json({
+        error: 'Delivery charge must be a valid non-negative number.',
+      });
+    }
+
+    const result = await db.query(
+      `
+        INSERT INTO cities (name, flat_shipping_rate)
+        VALUES ($1, $2)
+        RETURNING id, name, flat_shipping_rate
+      `,
+      [name, rate]
+    );
+
+    return s.status(201).json(result.rows[0]);
+  } catch (error) {
+    if (error.code === '23505') {
+      return s.status(409).json({
+        error: 'A shipping charge for this district or city already exists.',
+      });
+    }
+
+    console.error('[ADMIN_SHIPPING_CREATE_FAILED]', error.message);
+
+    return s.status(500).json({
+      error: 'Could not create shipping charge.',
+    });
+  }
+});
+
+router.put('/shipping/:id', async (q, s) => {
+  try {
+    const name = String(q.body?.name || '').trim();
+    const rate = Number(q.body?.flat_shipping_rate);
+
+    if (!name) {
+      return s.status(400).json({
+        error: 'District or city name is required.',
+      });
+    }
+
+    if (!Number.isFinite(rate) || rate < 0) {
+      return s.status(400).json({
+        error: 'Delivery charge must be a valid non-negative number.',
+      });
+    }
+
+    const result = await db.query(
+      `
+        UPDATE cities
+        SET name = $1,
+            flat_shipping_rate = $2
+        WHERE id = $3
+        RETURNING id, name, flat_shipping_rate
+      `,
+      [name, rate, q.params.id]
+    );
+
+    if (result.rowCount === 0) {
+      return s.status(404).json({
+        error: 'Shipping charge not found.',
+      });
+    }
+
+    return s.json(result.rows[0]);
+  } catch (error) {
+    if (error.code === '23505') {
+      return s.status(409).json({
+        error: 'A shipping charge for this district or city already exists.',
+      });
+    }
+
+    console.error('[ADMIN_SHIPPING_UPDATE_FAILED]', error.message);
+
+    return s.status(500).json({
+      error: 'Could not update shipping charge.',
+    });
+  }
+});
+
+router.delete('/shipping/:id', async (q, s) => {
+  try {
+    const result = await db.query(
+      `
+        DELETE FROM cities
+        WHERE id = $1
+        RETURNING id
+      `,
+      [q.params.id]
+    );
+
+    if (result.rowCount === 0) {
+      return s.status(404).json({
+        error: 'Shipping charge not found.',
+      });
+    }
+
+    return s.json({
+      success: true,
+      id: result.rows[0].id,
+    });
+  } catch (error) {
+    console.error('[ADMIN_SHIPPING_DELETE_FAILED]', error.message);
+
+    return s.status(500).json({
+      error: 'Could not delete shipping charge.',
     });
   }
 });
@@ -602,7 +777,7 @@ router.post('/products', async (q, s) => {
     let uploadedImages = [];
 
     try {
-      uploadedImages = await saveUploadedImages(filesArray);
+      uploadedImages = await saveUploadedImages(filesArray, q);
     } catch (imgErr) {
       const uploadError = safeUploadError(imgErr);
       console.error('[ADMIN_UPLOAD_ERROR]', uploadError);
@@ -664,7 +839,7 @@ router.post('/products', async (q, s) => {
       normalizedIsBestseller,
       normalizedIsActive,
       normalizedIsVault,
-      release_date || new Date().toISOString(),
+      release_date || new Date().toISOString().replace('T', ' ').replace(/\.\d{3}Z$/, ''),
     ]);
 
     const product = result.rows[0];
@@ -702,7 +877,10 @@ router.put('/products/:id', async (q, s) => {
       'SELECT image_url FROM product_images WHERE product_id = $1',
       [q.params.id]
     );
-    const uploadedImages = await saveUploadedImages(asFiles(q.files));
+    const uploadedImages = await saveUploadedImages(
+      asFiles(q.files),
+      q
+    );
 
     const hasExistingImages = Object.prototype.hasOwnProperty.call(
       q.body,
@@ -728,8 +906,13 @@ router.put('/products/:id', async (q, s) => {
 
     if (uploadedImages.length > 0 || hasExistingImages) {
       await writeImages(q.params.id, allImages);
-      await deleteIfUnreferenced(previousImages.rows.map((row) => row.image_url)
-        .filter((image) => !allImages.includes(image)));
+    
+      await deleteIfUnreferenced(
+        previousImages.rows
+          .map((row) => row.image_url)
+          .filter((image) => !allImages.includes(image)),
+        q
+      );
     }
 
     delete updates.existingImages;
@@ -905,7 +1088,10 @@ router.delete('/products/:id', async (q, s) => {
       });
     }
 
-    await deleteIfUnreferenced(images.rows.map((row) => row.image_url));
+    await deleteIfUnreferenced(
+      images.rows.map((row) => row.image_url),
+      q
+    );
     return s.json({ success: true });
   } catch (error) {
     console.error('[ADMIN_PRODUCT_DELETE_FAILED]', error.message);
@@ -1111,7 +1297,8 @@ router.put('/paara-irl', async (q, s) => {
           file,
           uploadSlots[index] === 'owner'
             ? 'owner'
-            : 'paara-irl'
+            : 'paara-irl',
+          q
         )
       )
     );
@@ -1193,10 +1380,17 @@ router.put('/paara-irl', async (q, s) => {
     );
 
     const row = result.rows[0];
-    await deleteIfUnreferenced([
-      previousImages.image_url,
-      previousImages.owner_image_url,
-    ].filter((image) => image && ![nextImageUrl, nextOwnerImageUrl].includes(image)));
+    await deleteIfUnreferenced(
+      [
+        previousImages.image_url,
+        previousImages.owner_image_url,
+      ].filter(
+        (image) =>
+          image &&
+          ![nextImageUrl, nextOwnerImageUrl].includes(image)
+      ),
+      q
+    );
 
     return s.json({
       ...row,
@@ -1241,11 +1435,27 @@ router.get('/paara-story', async (q, s) => {
       description: '',
     });
   } catch (error) {
-    console.error('[ADMIN_PAARA_STORY_GET_FAILED]', error.message);
-    return s.status(500).json({
-      error: 'Could not load Paara Story.',
+  if (error.code === '42P01') {
+    console.warn(
+      '[PAARA_STORY_TABLE_MISSING] Serving default story content.'
+    );
+
+    return s.json({
+      id: 1,
+      title: 'A dream shaped by fashion. A brand built with purpose.',
+      description: '',
     });
   }
+
+  console.error(
+    '[ADMIN_PAARA_STORY_GET_FAILED]',
+    error.message
+  );
+
+  return s.status(500).json({
+    error: 'Could not load Paara Story.',
+  });
+}
 });
 
 router.put('/paara-story', async (q, s) => {
@@ -1363,7 +1573,9 @@ router.put('/worn-by-you', async (q, s) => {
     );
 
     const uploadedImages = await Promise.all(
-      files.map((file) => saveUploadedImage(file, 'worn-by-you'))
+      files.map((file) =>
+        saveUploadedImage(file, 'worn-by-you', q)
+      )
     );
 
     const uploadedBySlot = Object.fromEntries(
@@ -1461,8 +1673,17 @@ router.put('/worn-by-you', async (q, s) => {
       await client.query('COMMIT');
       await deleteIfUnreferenced(
         [...previousImages.entries()]
-          .filter(([id, image]) => image && !saved.some((row) => Number(row.id) === id && row.image_url === image))
-          .map(([, image]) => image)
+          .filter(
+            ([id, image]) =>
+              image &&
+              !saved.some(
+                (row) =>
+                  Number(row.id) === id &&
+                  row.image_url === image
+              )
+          )
+          .map(([, image]) => image),
+        q
       );
 
       return s.json({
@@ -1520,7 +1741,10 @@ router.delete('/worn-by-you/:id', async (q, s) => {
       });
     }
 
-    await deleteIfUnreferenced(existing.rows.map((row) => row.image_url));
+    await deleteIfUnreferenced(
+      existing.rows.map((row) => row.image_url),
+      q
+    );
     return s.json({
       success: true,
       id: Number(q.params.id),

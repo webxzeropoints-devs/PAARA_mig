@@ -9,7 +9,6 @@ async function getDailyBestsellers(limit) {
     SELECT p.*, c.name AS category_name, c.gender
     FROM products p JOIN categories c ON c.id = p.category_id
     WHERE p.is_active = TRUE
-      AND p.release_date <= to_char(CURRENT_TIMESTAMP, 'YYYY-MM-DD HH24:MI:SS')
     ORDER BY p.id ASC
   `);
 
@@ -62,9 +61,7 @@ router.get('/', async (req, res) => {
       FROM products p
       JOIN categories c ON c.id = p.category_id
       WHERE p.is_active = TRUE
-        AND p.release_date <= to_char(CURRENT_TIMESTAMP, 'YYYY-MM-DD HH24:MI:SS')
     `;
-
     const params = [];
 
     if (gender) {
@@ -99,7 +96,7 @@ router.get('/', async (req, res) => {
         ? ' ORDER BY p.price ASC'
         : sort === 'price_desc'
           ? ' ORDER BY p.price DESC'
-          : ' ORDER BY p.release_date DESC';
+          : ' ORDER BY p.created_at DESC';
 
     if (req.query.limit) {
       const limit = parseInt(req.query.limit, 10) || 9;

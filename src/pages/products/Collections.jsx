@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
+import { createPortal } from "react-dom";
 import { useSearchParams } from "react-router-dom";
 import { motion } from "framer-motion";
 import { Filter, X } from "lucide-react";
@@ -80,6 +81,17 @@ export default function Collections() {
     getCategories().then((data) => setCategories(Array.isArray(data) ? data : [])).catch(() => setCategories([]));
   }, []);
 
+  useEffect(() => {
+  if (!mobileFiltersOpen) return;
+
+  const originalOverflow = document.body.style.overflow;
+  document.body.style.overflow = "hidden";
+
+  return () => {
+    document.body.style.overflow = originalOverflow;
+  };
+}, [mobileFiltersOpen]);
+
   const setFilter = (key, value) => {
     const next = new URLSearchParams(params);
     if (value) next.set(key, value);
@@ -97,6 +109,12 @@ export default function Collections() {
 
   const activeFilterCount = ["gender", "shopFor", "features", "vibe", "category", "subcategory"].filter((key) => filters[key]).length;
   const openMobileFilters = () => {
+    if (mobileFiltersOpen) {
+      setMobileFiltersOpen(false);
+      setMobileDraft(null);
+      return;
+    }
+  
     setMobileDraft({ ...filters });
     setMobileFiltersOpen(true);
   };
@@ -193,15 +211,41 @@ export default function Collections() {
           </aside>
 
           <section className="min-w-0">
-            <div className="mb-5 flex gap-2 md:hidden">
-              <button type="button" onClick={openMobileFilters} className="flex flex-1 items-center justify-between rounded-sm border border-cocoa/15 bg-sand/60 px-3 py-3 text-xs uppercase tracking-widest">
-                <span className="flex items-center gap-2"><Filter size={15} aria-hidden="true" /> Filters</span>
-                {activeFilterCount > 0 && <span className="grid h-5 min-w-5 place-items-center rounded-full bg-gold px-1 text-[10px] text-white">{activeFilterCount}</span>}
-              </button>
-              <select value={filters.sort} onChange={(e) => setFilter("sort", e.target.value)} aria-label="Sort products" className="min-w-0 flex-1 rounded-sm border border-cocoa/15 bg-sand/60 px-2 py-3 text-xs font-semibold outline-none">
-                {SORTS.map((s) => <option key={s.value} value={s.value}>{s.label.replace("Sort by: ", "")}</option>)}
-              </select>
-            </div>
+            <div className="mb-5 md:hidden">
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={openMobileFilters}
+                  className="flex flex-1 items-center justify-between rounded-sm border border-cocoa/15 bg-sand/60 px-3 py-3 text-xs uppercase tracking-widest"
+                >
+                  <span className="flex items-center gap-2">
+                    <Filter size={15} aria-hidden="true" />
+                    Filters
+                  </span>
+            
+                  {activeFilterCount > 0 && (
+                    <span className="grid h-5 min-w-5 place-items-center rounded-full bg-gold px-1 text-[10px] text-white">
+                      {activeFilterCount}
+                    </span>
+                  )}
+                </button>
+            
+                <select
+                  value={filters.sort}
+                  onChange={(e) => setFilter("sort", e.target.value)}
+                  aria-label="Sort products"
+                  className="min-w-0 flex-1 rounded-sm border border-cocoa/15 bg-sand/60 px-2 py-3 text-xs font-semibold outline-none"
+                >
+                  {SORTS.map((s) => (
+                    <option key={s.value} value={s.value}>
+                      {s.label.replace("Sort by: ", "")}
+                    </option>
+                  ))}
+                </select>
+                </div>
+              </div>
+            
+
             {error && (
               <div className="text-xs text-red-700 bg-red-50 border border-red-100 px-3 py-2 rounded-sm mb-6">
                 {error}
@@ -241,18 +285,25 @@ export default function Collections() {
           </section>
         </div>
       </div>
-      {mobileFiltersOpen && mobileDraft && (
-        <div className="fixed inset-0 z-50 flex items-end bg-cocoa/40 md:hidden" onClick={closeMobileFilters}>
+     {mobileFiltersOpen &&
+      mobileDraft &&
+      createPortal(
+        <div className="fixed inset-0 z-[9999] flex items-end bg-cocoa/40 md:hidden">
           <div
             role="dialog"
             aria-modal="true"
             aria-label="Product filters"
-            className="max-h-[85vh] w-full overflow-y-auto rounded-t-2xl bg-shell p-5 shadow-2xl"
-            onClick={(event) => event.stopPropagation()}
+            className="w-full max-h-[85dvh] overflow-y-auto overscroll-contain rounded-t-2xl bg-shell p-5 shadow-2xl"
           >
             <div className="mb-4 flex items-center justify-between">
               <h2 className="font-display text-2xl">Filters</h2>
-              <button type="button" onClick={closeMobileFilters} aria-label="Close filters" className="rounded-full p-2 text-cocoa/60 hover:bg-sand">
+    
+              <button
+                type="button"
+                onClick={closeMobileFilters}
+                aria-label="Close filters"
+                className="rounded-full p-2 text-cocoa/60 hover:bg-sand"
+              >
                 <X size={18} />
               </button>
             </div>
@@ -264,20 +315,58 @@ export default function Collections() {
               label="Collection"
               value={mobileDraft.category}
               options={categories}
-              onChange={(value) => setMobileDraft((current) => ({ ...current, category: value, subcategory: "" }))}
+              onChange={(value) =>
+                setMobileDraft((current) => ({
+                  ...current,
+                  category: value,
+                  subcategory: "",
+                }))
+              }
             />
+    
             <div className="mt-4">
-              <p className="mb-2 text-xs font-semibold uppercase tracking-widest text-cocoa/60">Sort</p>
-              <select value={mobileDraft.sort} onChange={(event) => setMobileDraft((current) => ({ ...current, sort: event.target.value }))} className="w-full border-b border-cocoa/30 bg-transparent py-2 text-sm font-semibold outline-none focus:border-gold">
-                {SORTS.map((sort) => <option key={sort.value} value={sort.value}>{sort.label}</option>)}
+              <p className="mb-2 text-xs font-semibold uppercase tracking-widest text-cocoa/60">
+                Sort
+              </p>
+    
+              <select
+                value={mobileDraft.sort}
+                onChange={(event) =>
+                  setMobileDraft((current) => ({
+                    ...current,
+                    sort: event.target.value,
+                  }))
+                }
+                className="w-full border-b border-cocoa/30 bg-transparent py-2 text-sm font-semibold outline-none focus:border-gold"
+              >
+                {SORTS.map((sort) => (
+                  <option key={sort.value} value={sort.value}>
+                    {sort.label}
+                  </option>
+                ))}
               </select>
             </div>
+    
             <div className="mt-6 flex gap-3 border-t border-cocoa/10 pt-4">
-              <button type="button" onClick={clearMobileFilters} className="flex-1 border border-cocoa/20 px-4 py-3 text-xs uppercase tracking-widest text-cocoa/70">Clear All</button>
-              <button type="button" onClick={applyMobileFilters} className="flex-1 bg-gold px-4 py-3 text-xs uppercase tracking-widest text-white hover:bg-cocoa">Apply Filters</button>
+              <button
+                type="button"
+                onClick={clearMobileFilters}
+                className="flex-1 border border-cocoa/20 px-4 py-3 text-xs uppercase tracking-widest text-cocoa/70"
+              >
+                Clear All
+              </button>
+    
+              <button
+                type="button"
+                onClick={applyMobileFilters}
+                className="flex-1 bg-gold px-4 py-3 text-xs uppercase tracking-widest text-white hover:bg-cocoa"
+              >
+                Apply Filters
+              </button>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );
@@ -290,6 +379,7 @@ function FilterGroup({ label, value, options, onChange }) {
       <div className="flex flex-wrap gap-2">
         {options.map((opt) => (
           <button
+            type="button"
             key={opt}
             onClick={() => onChange(value === opt ? "" : opt)}
             className={`text-xs uppercase tracking-widest px-3 py-1 rounded-sm border transition-colors font-semibold ${
