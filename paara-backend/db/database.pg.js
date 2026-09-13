@@ -67,6 +67,7 @@ module.exports = {
   query,
   close,
   ensurePaaraStoryTable,
+  ensureLoyaltyRewardRedemptionsTable,
   isServerless: false,
   persist: async () => true,
   persistAfterWrite: async () => true,
