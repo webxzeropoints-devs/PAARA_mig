@@ -164,8 +164,8 @@ function Hero() {
       <div className="absolute inset-0 bg-gradient-to-r from-black/55 via-black/20 to-black/5" />
       <div className="relative z-10 max-w-xl px-6 md:px-16 text-white">
         <motion.p variants={childFadeUp} className="text-xs uppercase tracking-[.35em] mb-5 text-white/80">Paara. Jewellery</motion.p>
-        <motion.h1 variants={childFadeUp} className="font-display text-5xl md:text-7xl leading-[.95]">Jewellery<br />Made to be Loved</motion.h1>
-        <motion.p variants={childFadeUp} className="mt-6 text-white/85 max-w-sm">Everyday heirlooms inspired by quiet coastal moments.</motion.p>
+        <motion.h1 variants={childFadeUp} className="font-display text-5xl md:text-7xl leading-[.95]">JEWELLERY<br />THAT FEELS LIKE YOU</motion.h1>
+        <motion.p variants={childFadeUp} className="mt-6 text-white/85 max-w-sm">Designed to complement every vision of you</motion.p>
         <motion.div variants={childFadeUp}><Link to="/shop" className="inline-block mt-8 bg-gold px-8 py-3 text-xs tracking-[.2em] uppercase hover:bg-cocoa transition-colors">Shop the collection</Link></motion.div>
       </div>
     </motion.div>
