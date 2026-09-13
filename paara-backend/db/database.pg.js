@@ -50,16 +50,6 @@ async function ensureLoyaltyRewardRedemptionsTable() {
   `);
 }
 
-    INSERT INTO paara_story (id, title, description)
-    VALUES (
-      1,
-      'A dream shaped by fashion. A brand built with purpose.',
-      'Paara Jewellery was founded by Dharshini, born from her lifelong love for fashion, styling, and the beauty found in intricate details.'
-    )
-    ON CONFLICT (id) DO NOTHING;
-  `);
-}
-
 pool.on('error', (err) => {
   console.error('[DB] Unexpected PostgreSQL pool error:', err);
 });
