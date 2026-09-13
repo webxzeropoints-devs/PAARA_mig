@@ -7,10 +7,14 @@ import ProductFlipCard from "../../components/ProductFlipCard";
 import { getCategories, getProducts } from "../../lib/api";
 import { fadeUp, gridParent, childFadeUp } from "../../lib/motion";
 import Seo from "../../components/Seo";
+import {
+  FEATURES,
+  GENDERS,
+  SHOP_FOR,
+  VIBES,
+  formatFilterLabel,
+} from "../../lib/productFilters";
 
-const MATERIALS = ["sterling_silver", "stainless_steel", "brass", "titanium"];
-const VIBES = ["everyday", "festive", "minimal"];
-const GENDERS = ["women", "men", "unisex"];
 const SORTS = [
   { value: "popularity", label: "Sort by: Popularity" },
   { value: "price_asc", label: "Price: Low to High" },
@@ -36,7 +40,8 @@ export default function Collections() {
     const audience = AUDIENCE_GENDERS[category] ? category : AUDIENCE_GENDERS[requestedGender] ? requestedGender : "";
     return {
       gender: audience ? AUDIENCE_GENDERS[audience] : requestedGender,
-      material: params.get("material") || "",
+      shopFor: params.get("shopFor") || "",
+      features: params.get("features") || "",
       vibe: params.get("vibe") || "",
       category,
       subcategory: params.get("subcategory") || "",
@@ -90,7 +95,7 @@ export default function Collections() {
     setParams(next, { replace: true });
   };
 
-  const activeFilterCount = ["gender", "material", "vibe", "category", "subcategory"].filter((key) => filters[key]).length;
+  const activeFilterCount = ["gender", "shopFor", "features", "vibe", "category", "subcategory"].filter((key) => filters[key]).length;
   const openMobileFilters = () => {
     setMobileDraft({ ...filters });
     setMobileFiltersOpen(true);
@@ -101,7 +106,7 @@ export default function Collections() {
   };
   const applyMobileFilters = () => {
     const next = new URLSearchParams(params);
-    ["gender", "material", "vibe", "category", "subcategory", "sort"].forEach((key) => {
+    ["gender", "shopFor", "features", "vibe", "category", "subcategory", "sort"].forEach((key) => {
       if (mobileDraft?.[key] && mobileDraft[key] !== (key === "sort" ? "popularity" : "")) next.set(key, mobileDraft[key]);
       else next.delete(key);
     });
@@ -140,10 +145,16 @@ export default function Collections() {
               onChange={(v) => setFilter("gender", v)}
             />
             <FilterGroup
-              label="Material"
-              value={filters.material}
-              options={MATERIALS}
-              onChange={(v) => setFilter("material", v)}
+              label="Shop For"
+              value={filters.shopFor}
+              options={SHOP_FOR}
+              onChange={(v) => setFilter("shopFor", v)}
+            />
+            <FilterGroup
+              label="Features"
+              value={filters.features}
+              options={FEATURES}
+              onChange={(v) => setFilter("features", v)}
             />
             <FilterGroup
               label="Vibe"
@@ -246,7 +257,8 @@ export default function Collections() {
               </button>
             </div>
             <FilterGroup label="Gender" value={mobileDraft.gender} options={GENDERS} onChange={(value) => setMobileDraft((current) => ({ ...current, gender: value }))} />
-            <FilterGroup label="Material" value={mobileDraft.material} options={MATERIALS} onChange={(value) => setMobileDraft((current) => ({ ...current, material: value }))} />
+            <FilterGroup label="Shop For" value={mobileDraft.shopFor} options={SHOP_FOR} onChange={(value) => setMobileDraft((current) => ({ ...current, shopFor: value }))} />
+            <FilterGroup label="Features" value={mobileDraft.features} options={FEATURES} onChange={(value) => setMobileDraft((current) => ({ ...current, features: value }))} />
             <FilterGroup label="Vibe" value={mobileDraft.vibe} options={VIBES} onChange={(value) => setMobileDraft((current) => ({ ...current, vibe: value }))} />
             <SelectFilter
               label="Collection"
@@ -286,7 +298,7 @@ function FilterGroup({ label, value, options, onChange }) {
                 : "border-cocoa/20 text-cocoa/70 hover:border-cocoa/40"
             }`}
           >
-            {opt.replace(/_/g, " ")}
+            {formatFilterLabel(opt)}
           </button>
         ))}
       </div>

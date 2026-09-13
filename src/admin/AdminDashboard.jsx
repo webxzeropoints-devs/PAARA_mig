@@ -17,6 +17,13 @@ import {
   adminUpdateProduct,
   toBoolean,
 } from "../lib/api";
+import {
+  FEATURES,
+  GENDERS,
+  SHOP_FOR,
+  VIBES,
+  formatFilterLabel,
+} from "../lib/productFilters";
 
 const getLocalDateTimeInputValue = () => {
   const now = new Date();
@@ -344,7 +351,7 @@ function CategoryEditor({ category, onClose, onSaved }) {
         material: form.material.trim(),
       };
 
-      if (!payload.name || !payload.slug || !["men", "women", "unisex"].includes(payload.gender)) {
+      if (!payload.name || !payload.slug || !GENDERS.includes(payload.gender)) {
         throw new Error("Name, slug, and gender are required.");
       }
 
@@ -393,7 +400,6 @@ function CategoryEditor({ category, onClose, onSaved }) {
             >
               <option value="women">Women</option>
               <option value="men">Men</option>
-              <option value="unisex">Unisex</option>
             </select>
           </label>
           <Row>
@@ -692,7 +698,10 @@ function ProductEditor({ product, categories, onClose, onSaved }) {
           slug: product.slug,
           description: product.description || "",
           price: product.price,
-          material: product.material || "",
+          gender: product.gender || "women",
+          vibe: product.vibe || "",
+          shopFor: Array.isArray(product.shopFor) ? product.shopFor : [],
+          features: Array.isArray(product.features) ? product.features : [],
           subcategory: product.subcategory || "",
           stock: product.stock ?? 0,
           is_exclusive: toBoolean(product.is_exclusive),
@@ -707,7 +716,10 @@ function ProductEditor({ product, categories, onClose, onSaved }) {
           slug: "",
           description: "",
           price: 0,
-          material: "",
+          gender: "women",
+          vibe: "",
+          shopFor: [],
+          features: [],
           subcategory: "",
           stock: 10,
           is_exclusive: false,
@@ -749,7 +761,10 @@ function ProductEditor({ product, categories, onClose, onSaved }) {
       formData.append("slug", form.slug);
       formData.append("description", form.description);
       formData.append("price", Number(form.price));
-      formData.append("material", form.material);
+      formData.append("gender", form.gender);
+      formData.append("vibe", form.vibe);
+      formData.append("shopFor", JSON.stringify(form.shopFor));
+      formData.append("features", JSON.stringify(form.features));
       formData.append("subcategory", form.subcategory);
       formData.append("stock", Number(form.stock));
       formData.append("is_exclusive", form.is_exclusive);
@@ -835,7 +850,39 @@ function ProductEditor({ product, categories, onClose, onSaved }) {
             <Input label="Stock" type="number" value={form.stock} onChange={(v) => update("stock", v)} />
           </Row>
           <Row>
-            <Input label="Material" value={form.material} onChange={(v) => update("material", v)} />
+            <label className="block">
+              <span className="block text-xs uppercase tracking-widest text-cocoa/60 mb-1.5">Gender</span>
+              <select
+                value={form.gender}
+                onChange={(e) => update("gender", e.target.value)}
+                className="w-full bg-transparent border-b border-cocoa/30 px-0 py-2 text-sm focus:outline-none focus:border-gold"
+              >
+                {GENDERS.map((gender) => (
+                  <option key={gender} value={gender} className="bg-shell">
+                    {formatFilterLabel(gender)}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="block">
+              <span className="block text-xs uppercase tracking-widest text-cocoa/60 mb-1.5">Vibe</span>
+              <select
+                value={form.vibe}
+                onChange={(e) => update("vibe", e.target.value)}
+                className="w-full bg-transparent border-b border-cocoa/30 px-0 py-2 text-sm focus:outline-none focus:border-gold"
+              >
+                <option value="" className="bg-shell">Select vibe</option>
+                {VIBES.map((vibe) => (
+                  <option key={vibe} value={vibe} className="bg-shell">
+                    {formatFilterLabel(vibe)}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </Row>
+          <CheckboxGroup label="Shop For" options={SHOP_FOR} value={form.shopFor} onChange={(value) => update("shopFor", value)} />
+          <CheckboxGroup label="Features" options={FEATURES} value={form.features} onChange={(value) => update("features", value)} />
+          <Row>
             <Input label="Subcategory" value={form.subcategory} onChange={(v) => update("subcategory", v)} />
           </Row>
           <div>
@@ -933,6 +980,36 @@ function Input({ label, type = "text", value, onChange, ...rest }) {
         {...rest}
       />
     </label>
+  );
+}
+
+function CheckboxGroup({ label, options, value, onChange }) {
+  const selected = Array.isArray(value) ? value : [];
+  const toggle = (option) => {
+    onChange(
+      selected.includes(option)
+        ? selected.filter((item) => item !== option)
+        : [...selected, option]
+    );
+  };
+
+  return (
+    <fieldset>
+      <legend className="block text-xs uppercase tracking-widest text-cocoa/60 mb-1.5">{label}</legend>
+      <div className="flex flex-wrap gap-3">
+        {options.map((option) => (
+          <label key={option} className="flex items-center gap-2 text-xs uppercase tracking-widest text-cocoa/75">
+            <input
+              type="checkbox"
+              checked={selected.includes(option)}
+              onChange={() => toggle(option)}
+              className="accent-gold"
+            />
+            {formatFilterLabel(option)}
+          </label>
+        ))}
+      </div>
+    </fieldset>
   );
 }
 
