@@ -139,7 +139,7 @@ export default function AdminOrders() {
       <div className="w-full max-w-full overflow-x-auto border border-cocoa/10 bg-shell">
         <table className="w-full min-w-[1100px] table-fixed bg-shell text-sm">
           <colgroup><col className="w-[10%]" /><col className="w-[12%]" /><col className="w-[16%]" /><col className="w-[18%]" /><col className="w-[10%]" /><col className="w-[7%]" /><col className="w-[7%]" /><col className="w-[20%]" /></colgroup>
-          <thead className="border-b border-gold/30 text-left font-display text-[10px] uppercase tracking-[.18em] text-cocoa"><tr><th className="px-3 py-3.5">Order ID</th><th className="px-3 py-3.5">Customer</th><th className="px-3 py-3.5">Shipping Address</th><th className="px-3 py-3.5">Status</th><th className="px-3 py-3.5">Payment</th><th className="px-3 py-3.5 text-right">Amount</th><th className="px-3 py-3.5">Date</th><th className="px-3 py-3.5">Loyalty</th></tr></thead>
+          <thead className="border-b border-gold/30 text-left font-display text-[10px] uppercase tracking-[.18em] text-cocoa"><tr><th className="px-3 py-3.5">Order ID</th><th className="px-3 py-3.5">Products</th><th className="px-3 py-3.5">Shipping Address</th><th className="px-3 py-3.5">Status</th><th className="px-3 py-3.5">Payment</th><th className="px-3 py-3.5 text-right">Amount</th><th className="px-3 py-3.5">Date</th><th className="px-3 py-3.5">Loyalty</th></tr></thead>
           <tbody>
             {orders.map((order) => {
               const currentStatus = normalizeStatus(order.status);
@@ -150,7 +150,7 @@ export default function AdminOrders() {
               const isManualUpiVerifying = order.payment_method === "manual_upi" && order.payment_status !== "verified";
               return <tr key={order.id} className="border-b border-cocoa/10 align-top odd:bg-sand/35">
                 <td className="min-w-0 break-words px-3 py-6 text-cocoa"><p className="break-words font-semibold">{order.order_number || `ORD-${order.id}`}</p><p className="mt-1 text-[10px] uppercase tracking-widest text-cocoa/50">Customer #{order.customer_id}</p></td>
-                <td className="min-w-0 px-3 py-6"><p className="truncate font-semibold text-cocoa" title={order.customer_name}>{order.customer_name}</p><p className="truncate text-xs text-cocoa/50" title={order.customer_email}>{order.customer_email}</p></td>
+                <td className="min-w-0 px-3 py-6 text-cocoa">{order.items?.length ? <ul className="space-y-1.5">{order.items.map((item, index) => <li key={`${item.product_name}-${index}`} className="break-words text-xs leading-relaxed">{item.product_name} <span className="whitespace-nowrap text-cocoa/60">× {item.quantity}</span></li>)}</ul> : <span className="text-xs text-cocoa/40">No products found</span>}</td>
                 <td className="min-w-0 break-words px-3 py-6 text-xs leading-relaxed text-cocoa/75">
                   {order.shipping_line1 ? <p className="break-words">{order.shipping_line1}{order.shipping_line2 ? `, ${order.shipping_line2}` : ""}<br />{order.shipping_city}, {order.shipping_state} - {order.shipping_pincode}{order.shipping_country ? `, ${order.shipping_country}` : ""}</p> : <span className="text-cocoa/40">Not available</span>}
                 </td>

@@ -2079,7 +2079,22 @@ router.get('/orders', async (q, s) => {
       ORDER BY o.created_at DESC
     `);
 
-    return s.json(result.rows);
+    const orders = result.rows;
+    if (orders.length > 0) {
+      const { rows: items } = await db.query(
+        'SELECT order_id, product_name, quantity FROM order_items WHERE order_id = ANY($1::int[]) ORDER BY id ASC',
+        [orders.map((order) => order.id)]
+      );
+      const itemsByOrderId = new Map();
+      for (const item of items) {
+        const orderItems = itemsByOrderId.get(item.order_id) || [];
+        orderItems.push(item);
+        itemsByOrderId.set(item.order_id, orderItems);
+      }
+      for (const order of orders) order.items = itemsByOrderId.get(order.id) || [];
+    }
+
+    return s.json(orders);
   } catch (error) {
     console.error('[ADMIN_ORDERS_GET_FAILED]', error.message);
 
