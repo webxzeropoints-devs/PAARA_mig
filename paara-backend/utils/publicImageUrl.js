@@ -35,7 +35,8 @@ if (/^stratus:/i.test(image)) {
       ) &&
       (
         parsed.pathname.startsWith('/uploads/') ||
-        parsed.pathname.startsWith('/images/blob/')
+        parsed.pathname.startsWith('/images/blob/') ||
+        parsed.pathname.startsWith('/media/')
       )
     ) {
       if (parsed.pathname.startsWith('/uploads/')) {

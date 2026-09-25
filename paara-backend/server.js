@@ -132,10 +132,10 @@ app.get('/media/*', async (req, res) => {
       return res.status(404).end();
     }
 
-    const media = await mediaStore.download(
-      `stratus:${objectKey}`,
-      req
-    );
+    const reference = objectKey.startsWith('products/')
+      ? `stratus:${objectKey}`
+      : `catalyst-file:${objectKey}`;
+    const media = await mediaStore.download(reference, req);
 
     if (!media) {
       return res.status(404).end();

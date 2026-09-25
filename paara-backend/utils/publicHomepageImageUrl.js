@@ -30,7 +30,8 @@ const publicHomepageImageUrl = (value) => {
       ['paarajewellery.in', 'www.paarajewellery.in'].includes(
         parsed.hostname
       ) &&
-      parsed.pathname.startsWith('/uploads/')
+      parsed.pathname.startsWith('/uploads/') ||
+      parsed.pathname.startsWith('/media/')
     ) {
       return `${parsed.pathname}${parsed.search}`;
     }

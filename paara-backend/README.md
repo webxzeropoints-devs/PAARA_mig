@@ -49,10 +49,11 @@ values:
 included in `FRONTEND_URL`; credentials and PayU callbacks must use HTTPS.
 
 AppSail local filesystem storage is not used for uploads. Product, homepage,
-Paara IRL, owner, Worn By You, and other admin image uploads go to the
-Catalyst File Store folder identified by `PAARA_MEDIA_FOLDER_ID`. PostgreSQL
-stores opaque `catalyst-file:<id>` references and the API exposes all new media
-through `/media/<id>`, so the frontend does not depend on storage internals.
+Paara IRL, owner, Worn By You, and other admin image uploads use Stratus when
+`PAARA_STRATUS_BUCKET` is configured, otherwise the Catalyst File Store folder
+identified by `PAARA_MEDIA_FOLDER_ID`. PostgreSQL stores opaque
+`stratus:<object-key>` or `catalyst-file:<id>` references and the API exposes
+both through `/media/*`, so the frontend does not depend on storage internals.
 Legacy `/images/*` and `/uploads/*` references remain readable for migrated
 records; they are not rewritten or deleted automatically.
 
