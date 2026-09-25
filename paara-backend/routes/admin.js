@@ -2082,6 +2082,41 @@ router.delete('/gift-card-rules/:id', async (q, s) => {
     });
   }
 });
+
+router.get('/loyalty-settings', async (q, s) => {
+  try {
+    const result = await db.query(
+      'SELECT reward_threshold FROM loyalty_settings WHERE id = 1'
+    );
+    return s.json({ reward_threshold: Number(result.rows[0]?.reward_threshold || 19) });
+  } catch (error) {
+    console.error('[ADMIN_LOYALTY_SETTINGS_GET_FAILED]', error.message);
+    return s.status(500).json({ error: 'Could not load loyalty settings.' });
+  }
+});
+
+router.put('/loyalty-settings', async (q, s) => {
+  const threshold = Number(q.body?.reward_threshold);
+
+  if (!Number.isFinite(threshold) || threshold <= 0) {
+    return s.status(400).json({ error: 'Enter a valid loyalty threshold.' });
+  }
+
+  try {
+    const result = await db.query(`
+      INSERT INTO loyalty_settings (id, reward_threshold, updated_at)
+      VALUES (1, $1, to_char(CURRENT_TIMESTAMP, 'YYYY-MM-DD HH24:MI:SS'))
+      ON CONFLICT (id) DO UPDATE
+      SET reward_threshold = EXCLUDED.reward_threshold,
+          updated_at = EXCLUDED.updated_at
+      RETURNING reward_threshold
+    `, [threshold]);
+    return s.json({ reward_threshold: Number(result.rows[0].reward_threshold) });
+  } catch (error) {
+    console.error('[ADMIN_LOYALTY_SETTINGS_UPDATE_FAILED]', error.message);
+    return s.status(400).json({ error: 'Could not save loyalty settings.' });
+  }
+});
 router.get('/orders', async (q, s) => {
   try {
     const result = await db.query(`

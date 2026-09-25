@@ -378,6 +378,9 @@ if (db.isServerless) {
   
       await db.ensureLoyaltyRewardRedemptionsTable();
       console.log('[DB] Loyalty reward redemptions table verified.');
+
+      await db.ensureLoyaltySettingsTable();
+      console.log('[DB] Loyalty settings table verified.');
     } catch (error) {
       console.error('[DB] Failed to initialize database tables:', error.message);
     }

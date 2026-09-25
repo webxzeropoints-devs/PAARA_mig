@@ -20,8 +20,6 @@ const EMPTY_COUPON = {
   is_active: true,
 };
 
-const EMPTY_LOYALTY_RULE = { product_id: "", gift_card_value: "", is_active: true };
-
 function formatDiscount(c) {
   if (!c) return "—";
   if (c.discount_type === "percent") return `${c.discount_value}% OFF`;
@@ -41,16 +39,13 @@ function toIso(local) {
 
 export default function AdminPromotions() {
   const [coupons, setCoupons] = useState([]);
-  const [rules, setRules] = useState([]);
-  const [products, setProducts] = useState([]);
   const [loadingCoupons, setLoadingCoupons] = useState(true);
   const [loadingLoyalty, setLoadingLoyalty] = useState(true);
   const [error, setError] = useState("");
   const [activeTab, setActiveTab] = useState("coupons");
 
   const [couponEditor, setCouponEditor] = useState(null);
-  const [loyaltyForm, setLoyaltyForm] = useState(EMPTY_LOYALTY_RULE);
-  const [editingLoyaltyId, setEditingLoyaltyId] = useState(null);
+  const [loyaltyThreshold, setLoyaltyThreshold] = useState("");
   const [loyaltySaving, setLoyaltySaving] = useState(false);
   const [loyaltyError, setLoyaltyError] = useState("");
 
@@ -71,14 +66,10 @@ export default function AdminPromotions() {
     setLoadingLoyalty(true);
     setLoyaltyError("");
     try {
-      const [productList, ruleList] = await Promise.all([
-        adminRequest("/admin/products"),
-        adminRequest("/admin/gift-card-rules"),
-      ]);
-      setProducts(productList || []);
-      setRules(ruleList || []);
+      const settings = await adminRequest("/admin/loyalty-settings");
+      setLoyaltyThreshold(String(settings?.reward_threshold ?? ""));
     } catch (err) {
-      setLoyaltyError(err.message || "Could not load loyalty card rules.");
+      setLoyaltyError(err.message || "Could not load loyalty settings.");
     } finally {
       setLoadingLoyalty(false);
     }
@@ -104,67 +95,16 @@ export default function AdminPromotions() {
     setLoyaltySaving(true);
     setLoyaltyError("");
     try {
-      const payload = {
-        product_id: Number(loyaltyForm.product_id),
-        gift_card_value: Number(loyaltyForm.gift_card_value),
-        is_active: loyaltyForm.is_active,
-      };
-
-      if (!payload.product_id || !Number.isFinite(payload.gift_card_value) || payload.gift_card_value <= 0) {
-        throw new Error("Select a product and enter a valid loyalty value.");
+      const reward_threshold = Number(loyaltyThreshold);
+      if (!Number.isFinite(reward_threshold) || reward_threshold <= 0) {
+        throw new Error("Enter a valid loyalty threshold.");
       }
-
-      if (editingLoyaltyId) {
-        await adminRequest(`/admin/gift-card-rules/${editingLoyaltyId}`, { method: "PUT", body: payload });
-      } else {
-        await adminRequest("/admin/gift-card-rules", { method: "POST", body: payload });
-      }
-
-      setLoyaltyForm(EMPTY_LOYALTY_RULE);
-      setEditingLoyaltyId(null);
+      await adminRequest("/admin/loyalty-settings", { method: "PUT", body: { reward_threshold } });
       await loadLoyaltyRules();
     } catch (err) {
-      setLoyaltyError(err.message || "Could not save loyalty card rule.");
+      setLoyaltyError(err.message || "Could not save loyalty settings.");
     } finally {
       setLoyaltySaving(false);
-    }
-  };
-
-  const resetLoyaltyForm = () => {
-    setLoyaltyForm(EMPTY_LOYALTY_RULE);
-    setEditingLoyaltyId(null);
-  };
-
-  const editLoyaltyRule = (rule) => {
-    setEditingLoyaltyId(rule.id);
-    setLoyaltyForm({
-      product_id: String(rule.product_id),
-      gift_card_value: String(rule.gift_card_value),
-      is_active: toBoolean(rule.is_active),
-    });
-    setActiveTab("loyalty");
-  };
-
-  const toggleLoyaltyRule = async (rule) => {
-    try {
-      await adminRequest(`/admin/gift-card-rules/${rule.id}`, { method: "PUT", body: {
-        product_id: rule.product_id,
-        gift_card_value: rule.gift_card_value,
-        is_active: !toBoolean(rule.is_active),
-      } });
-      await loadLoyaltyRules();
-    } catch (err) {
-      setLoyaltyError(err.message || "Could not update loyalty card rule.");
-    }
-  };
-
-  const removeLoyaltyRule = async (rule) => {
-    if (!window.confirm(`Delete the loyalty card rule for ${rule.product_name}?`)) return;
-    try {
-      await adminRequest(`/admin/gift-card-rules/${rule.id}`, { method: "DELETE" });
-      await loadLoyaltyRules();
-    } catch (err) {
-      setLoyaltyError(err.message || "Could not delete loyalty card rule.");
     }
   };
 
@@ -285,68 +225,23 @@ export default function AdminPromotions() {
           <div className="mb-4">
             <p className="text-[10px] uppercase tracking-[.28em] text-gold">Customer rewards</p>
             <h2 className="mt-2 font-display text-3xl text-cocoa">Loyalty Card</h2>
-            <p className="mt-2 text-sm text-cocoa/60">Configure rewards for qualifying products. These grants are approved per order.</p>
+            <p className="mt-2 text-sm text-cocoa/60">Set the combined item total required to earn one loyalty stamp.</p>
           </div>
 
           {loyaltyError && <p className="mb-5 border border-gold/40 bg-shell px-4 py-3 text-sm text-cocoa">{loyaltyError}</p>}
 
           <form onSubmit={handleLoyaltySubmit} className="mb-8 border border-cocoa/10 bg-shell p-5">
-            <div className="mb-4 flex items-center justify-between">
-              <h3 className="font-display text-2xl text-cocoa">{editingLoyaltyId ? "Edit rule" : "New rule"}</h3>
-              {!editingLoyaltyId && <Plus size={18} className="text-gold" />}
-            </div>
-            <div className="grid gap-4 md:grid-cols-[1fr_13rem_auto] md:items-end">
+            <div className="grid gap-4 md:grid-cols-[13rem_auto] md:items-end">
               <label className="text-xs uppercase tracking-widest text-cocoa/60">
-                Product
-                <select required value={loyaltyForm.product_id} onChange={(e) => setLoyaltyForm({ ...loyaltyForm, product_id: e.target.value })} className="mt-2 w-full border border-cocoa/20 bg-sand px-3 py-2 text-sm text-cocoa outline-none focus:border-gold">
-                  <option value="">Select a product</option>
-                  {products.map((product) => <option key={product.id} value={product.id}>{product.name}</option>)}
-                </select>
-              </label>
-              <label className="text-xs uppercase tracking-widest text-cocoa/60">
-                Loyalty value
-                <input required min="1" step="0.01" type="number" value={loyaltyForm.gift_card_value} onChange={(e) => setLoyaltyForm({ ...loyaltyForm, gift_card_value: e.target.value })} placeholder="₹ value" className="mt-2 w-full border border-cocoa/20 bg-sand px-3 py-2 text-sm text-cocoa outline-none focus:border-gold" />
+                Order threshold
+                <input required min="0.01" step="0.01" type="number" value={loyaltyThreshold} onChange={(e) => setLoyaltyThreshold(e.target.value)} placeholder="₹ amount" className="mt-2 w-full border border-cocoa/20 bg-sand px-3 py-2 text-sm text-cocoa outline-none focus:border-gold" />
               </label>
               <div className="flex gap-2">
-                <button type="submit" disabled={loyaltySaving} className="bg-gold px-4 py-2 text-xs uppercase tracking-widest text-sand hover:bg-cocoa disabled:opacity-50">{loyaltySaving ? "Saving..." : editingLoyaltyId ? "Save" : "Create"}</button>
-                {editingLoyaltyId && <button type="button" onClick={resetLoyaltyForm} className="border border-cocoa/20 px-4 py-2 text-xs uppercase tracking-widest text-cocoa/70">Cancel</button>}
+                <button type="submit" disabled={loyaltySaving} className="bg-gold px-4 py-2 text-xs uppercase tracking-widest text-sand hover:bg-cocoa disabled:opacity-50">{loyaltySaving ? "Saving..." : "Save threshold"}</button>
               </div>
             </div>
           </form>
-
-          <div className="overflow-x-auto border border-cocoa/10 bg-shell">
-            <table className="w-full text-sm">
-              <thead className="border-b border-gold/30 text-left font-display text-xs uppercase tracking-[.18em] text-cocoa">
-                <tr>
-                  <th className="px-4 py-3">Product</th>
-                  <th className="px-4 py-3">Value</th>
-                  <th className="px-4 py-3">Status</th>
-                  <th className="px-4 py-3 text-right">Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {rules.map((rule) => (
-                  <tr key={rule.id} className="border-b border-cocoa/10 odd:bg-sand/35">
-                    <td className="px-4 py-3 font-product-name text-cocoa">{rule.product_name}</td>
-                    <td className="px-4 py-3 text-cocoa font-numeric">₹{Number(rule.gift_card_value).toLocaleString("en-IN")}</td>
-                    <td className="px-4 py-3 text-xs uppercase tracking-widest text-cocoa/60">{toBoolean(rule.is_active) ? "Active" : "Inactive"}</td>
-                    <td className="px-4 py-3 text-right">
-                      <div className="inline-flex gap-2">
-                        <button type="button" onClick={() => toggleLoyaltyRule(rule)} className="px-2 py-1 text-[10px] uppercase tracking-widest text-gold">{toBoolean(rule.is_active) ? "Deactivate" : "Activate"}</button>
-                        <button type="button" onClick={() => editLoyaltyRule(rule)} className="p-2 text-gold" aria-label="Edit loyalty rule"><Edit size={15} /></button>
-                        <button type="button" onClick={() => removeLoyaltyRule(rule)} className="p-2 text-cocoa" aria-label="Delete loyalty rule"><Trash2 size={15} /></button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-                {rules.length === 0 && (
-                  <tr>
-                    <td colSpan={4} className="px-4 py-10 text-center text-sm text-cocoa/60">No loyalty card rules yet.</td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
+          <p className="text-sm text-cocoa/60">Every paid qualifying order earns one stamp when its combined eligible item total meets this amount.</p>
         </div>
       )}
 

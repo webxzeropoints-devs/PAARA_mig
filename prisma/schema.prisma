@@ -281,6 +281,14 @@ model LoyaltyRewardRedemption {
   @@map("loyalty_reward_redemptions")
 }
 
+model LoyaltySettings {
+  id              Int     @id
+  rewardThreshold Decimal @map("reward_threshold") @db.Decimal(12, 2)
+  updatedAt       String  @default(dbgenerated("to_char(CURRENT_TIMESTAMP, 'YYYY-MM-DD HH24:MI:SS')")) @map("updated_at")
+
+  @@map("loyalty_settings")
+}
+
 model GiftCardRule {
   id             Int      @id @default(autoincrement())
   productId      Int      @unique @map("product_id")

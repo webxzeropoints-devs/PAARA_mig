@@ -295,6 +295,7 @@ export const getOrders = () => apiGet("/orders");
 export const getOrderById = (id) => apiGet(`/orders/${id}`);
 export const getOrderStatus = (orderId, email) => apiGet(`/orders/${orderId}/status?email=${encodeURIComponent(email)}`);
 export const getLoyaltyStatus = () => apiGet("/loyalty");
+export const getLoyaltyThreshold = () => apiGet("/loyalty/threshold");
 export const getLoyaltyOrder = (orderId) => apiGet(`/loyalty/order/${orderId}`);
 export const getPaaraStory = () => apiGet("/paara-story");
 export const processLoyaltyOrder = (orderId) => apiPost("/loyalty/process-order", { order_id: orderId });

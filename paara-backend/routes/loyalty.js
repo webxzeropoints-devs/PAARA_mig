@@ -2,12 +2,23 @@ const express = require('express');
 const { requireAuth } = require('../middleware/auth');
 const {
   getLoyaltyState,
+  getLoyaltyThreshold,
   processLoyaltyOrder,
   redeemLoyaltyReward,
 } = require('../services/loyalty');
 const db = require('../db/database.pg');
 
 const router = express.Router();
+
+router.get('/threshold', async (req, res) => {
+  try {
+    res.set('Cache-Control', 'no-store');
+    return res.json({ threshold: await getLoyaltyThreshold() });
+  } catch (error) {
+    console.error('[LOYALTY_THRESHOLD_FAILED]', error.message);
+    return res.status(500).json({ error: 'Could not load the loyalty threshold.' });
+  }
+});
 
 router.get('/', requireAuth, async (req, res) => {
   try {

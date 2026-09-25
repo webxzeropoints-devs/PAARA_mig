@@ -1,6 +1,6 @@
 const db = require('../db/database.pg');
 
-const THRESHOLD = 19;
+const DEFAULT_THRESHOLD = 19;
 const CARD_SIZE = 6;
 const VALIDITY_MONTHS = 6;
 
@@ -10,7 +10,7 @@ const addMonths = (date, months) => {
   return result.toISOString();
 };
 
-const serializeCard = (card) => ({
+const serializeCard = (card, threshold = DEFAULT_THRESHOLD) => ({
   stampCount: Number(card?.stamp_count || 0),
   totalStamps: Number(card?.total_stamps || 0),
   cardsCompleted: Number(card?.cards_completed || 0),
@@ -18,11 +18,21 @@ const serializeCard = (card) => ({
   expiresAt: card?.expires_at || null,
   completedAt: card?.completed_at || null,
   rewardEligible: Boolean(card?.completed_at && !card?.reward_redeemed_at),
-  threshold: THRESHOLD,
+  threshold,
   cardSize: CARD_SIZE,
   history: card?.history || [],
   rewardHistory: card?.reward_history || [],
 });
+
+async function getLoyaltyThreshold(client = db) {
+  const result = await client.query(
+    'SELECT reward_threshold FROM loyalty_settings WHERE id = 1'
+  );
+  const threshold = Number(result.rows[0]?.reward_threshold);
+  return Number.isFinite(threshold) && threshold > 0
+    ? threshold
+    : DEFAULT_THRESHOLD;
+}
 
 async function ensureLoyaltyCard(client, customerId) {
   await client.query(
@@ -74,7 +84,7 @@ async function getLoyaltyState(customerId, client = db) {
     ...card,
     history: historyResult.rows,
     reward_history: rewardHistoryResult.rows,
-  });
+  }, await getLoyaltyThreshold(client));
 }
 
 async function redeemLoyaltyReward(customerId) {
@@ -166,10 +176,11 @@ async function processLoyaltyOrder(orderId, customerId) {
     const paymentStatus = String(order.payment_status || '').trim().toLowerCase();
     const paymentMethod = String(order.payment_method || '').trim().toLowerCase();
 
+    const threshold = await getLoyaltyThreshold(client);
     const qualifies =
       paymentMethod === 'payu' &&
       paymentStatus === 'paid' &&
-      Number(order.subtotal) >= THRESHOLD;
+      Number(order.subtotal) >= threshold;
 
     if (!qualifies) {
       const state = await getLoyaltyState(customerId, client);
@@ -291,6 +302,7 @@ async function processLoyaltyOrder(orderId, customerId) {
 
 module.exports = {
   CARD_SIZE,
+  getLoyaltyThreshold,
   getLoyaltyState,
   processLoyaltyOrder,
   redeemLoyaltyReward,

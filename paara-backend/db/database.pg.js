@@ -50,6 +50,20 @@ async function ensureLoyaltyRewardRedemptionsTable() {
   `);
 }
 
+async function ensureLoyaltySettingsTable() {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS loyalty_settings (
+      id INTEGER PRIMARY KEY CHECK (id = 1),
+      reward_threshold NUMERIC(12, 2) NOT NULL CHECK (reward_threshold > 0),
+      updated_at TEXT NOT NULL DEFAULT to_char(CURRENT_TIMESTAMP, 'YYYY-MM-DD HH24:MI:SS')
+    );
+
+    INSERT INTO loyalty_settings (id, reward_threshold)
+    VALUES (1, 19)
+    ON CONFLICT (id) DO NOTHING;
+  `);
+}
+
 pool.on('error', (err) => {
   console.error('[DB] Unexpected PostgreSQL pool error:', err);
 });
@@ -68,6 +82,7 @@ module.exports = {
   close,
   ensurePaaraStoryTable,
   ensureLoyaltyRewardRedemptionsTable,
+  ensureLoyaltySettingsTable,
   isServerless: false,
   persist: async () => true,
   persistAfterWrite: async () => true,
