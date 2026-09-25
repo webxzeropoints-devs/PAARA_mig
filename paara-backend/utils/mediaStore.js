@@ -1,7 +1,4 @@
 const crypto = require('crypto');
-const fs = require('fs');
-const os = require('os');
-const path = require('path');
 
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
 
@@ -159,39 +156,24 @@ async function uploadImage(file, prefix = 'image', req) {
 
   const bucket = getBucket(req);
 
-  const tempPath = path.join(
-    os.tmpdir(),
-    `paara-${crypto.randomUUID()}${extension}`
+  // Multer has already provided the complete image as a Buffer. Passing that
+  // exact buffer to Stratus avoids a second filesystem/stream hop, which can
+  // yield an incomplete upload when the temporary stream is interrupted.
+  const uploadResult = await bucket.putObject(
+    objectKey,
+    file.buffer,
+    {
+      contentType: file.mimetype,
+      overwrite: false,
+    }
   );
 
-  try {
-    await fs.promises.writeFile(
-      tempPath,
-      file.buffer
-    );
-
-    const uploadResult = await bucket.putObject(
-      objectKey,
-      fs.createReadStream(tempPath),
-      {
-        contentType: file.mimetype,
-        overwrite: false,
-      }
-    );
-
-    return {
-      reference: `stratus:${objectKey}`,
-      objectKey,
-      contentType: file.mimetype,
-      uploadResult,
-    };
-  } finally {
-    try {
-      await fs.promises.unlink(tempPath);
-    } catch {
-      // Ignore temporary-file cleanup failures.
-    }
-  }
+  return {
+    reference: `stratus:${objectKey}`,
+    objectKey,
+    contentType: file.mimetype,
+    uploadResult,
+  };
 }
 
 async function streamToBuffer(stream) {
