@@ -1004,7 +1004,7 @@ function ProductEditor({ product, categories, onClose, onSaved }) {
           price: product.price,
           gender: product.gender || "women",
           vibe: product.vibe || "",
-          shopFor: normalizeOptionList(product.shopFor),
+          shopFor: normalizeOptionList(product.shop_for),
           features: normalizeOptionList(product.features),
           subcategory: product.subcategory || "",
           stock: product.stock ?? 0,
@@ -1067,7 +1067,7 @@ function ProductEditor({ product, categories, onClose, onSaved }) {
       formData.append("price", Number(form.price));
       formData.append("gender", form.gender);
       formData.append("vibe", form.vibe);
-      formData.append("shopFor", JSON.stringify(form.shopFor));
+      formData.append("shop_for", JSON.stringify(form.shopFor));
       formData.append("features", JSON.stringify(form.features));
       formData.append("subcategory", form.subcategory);
       formData.append("stock", Number(form.stock));

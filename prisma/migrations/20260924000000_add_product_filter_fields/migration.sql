@@ -1,0 +1,3 @@
+ALTER TABLE "products"
+ADD COLUMN "shop_for" TEXT NOT NULL DEFAULT '[]',
+ADD COLUMN "features" TEXT NOT NULL DEFAULT '[]';

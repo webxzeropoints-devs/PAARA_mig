@@ -42,6 +42,8 @@ model Product {
   weightKg         Float             @default(0.1) @map("weight_kg")
   material         String?
   subcategory      String?
+  shopFor          String            @default("[]") @map("shop_for")
+  features         String            @default("[]")
   stock            Int               @default(0)
   isExclusive      Boolean           @default(false) @map("is_exclusive")
   isBestseller     Boolean           @default(false) @map("is_bestseller")

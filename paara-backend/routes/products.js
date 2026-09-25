@@ -53,7 +53,7 @@ router.get('/', async (req, res) => {
       return res.json(await addProductImages(products));
     }
 
-    const { gender, material, vibe, category, subcategory, sort } = req.query;
+    const { gender, material, vibe, category, subcategory, shopFor, features, sort } = req.query;
 
     let sql = `
       SELECT p.*, c.name AS category_name, c.gender,
@@ -88,6 +88,16 @@ router.get('/', async (req, res) => {
     if (subcategory) {
       sql += ' AND p.subcategory = $' + (params.length + 1);
       params.push(subcategory);
+    }
+
+    if (shopFor) {
+      sql += ' AND COALESCE(p.shop_for, \'[]\')::jsonb ? $' + (params.length + 1);
+      params.push(shopFor);
+    }
+
+    if (features) {
+      sql += ' AND COALESCE(p.features, \'[]\')::jsonb ? $' + (params.length + 1);
+      params.push(features);
     }
 
     sql += sort === 'popularity'

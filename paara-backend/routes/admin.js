@@ -26,6 +26,17 @@ const normalizeFormBoolean = (value, fallback = false) => {
   return Boolean(value);
 };
 
+const normalizeFilterOptions = (value) => {
+  if (Array.isArray(value)) return value.map((option) => String(option).trim()).filter(Boolean);
+  if (!value) return [];
+  try {
+    const parsed = JSON.parse(value);
+    return Array.isArray(parsed) ? parsed.map((option) => String(option).trim()).filter(Boolean) : [];
+  } catch {
+    return [];
+  }
+};
+
 const cleanImages = (images) => (Array.isArray(images)
   ? images.map((image) => String(image || '').trim()).filter(Boolean)
   : []);
@@ -722,6 +733,8 @@ router.post('/products', async (q, s) => {
       price,
       material = null,
       subcategory = null,
+      shop_for = '[]',
+      features = '[]',
       stock = 0,
       is_exclusive = false,
       is_bestseller = false,
@@ -817,6 +830,8 @@ router.post('/products', async (q, s) => {
         price,
         material,
         subcategory,
+        shop_for,
+        features,
         stock,
         is_exclusive,
         is_bestseller,
@@ -824,7 +839,7 @@ router.post('/products', async (q, s) => {
         is_vault,
         release_date
       )
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
       RETURNING *
     `, [
       normalizedCategoryId,
@@ -834,6 +849,8 @@ router.post('/products', async (q, s) => {
       normalizedPrice,
       material,
       subcategory,
+      JSON.stringify(normalizeFilterOptions(shop_for)),
+      JSON.stringify(normalizeFilterOptions(features)),
       normalizedStock,
       normalizedIsExclusive,
       normalizedIsBestseller,
@@ -920,6 +937,9 @@ router.put('/products/:id', async (q, s) => {
     delete updates.upload_slots;
     delete updates.existing_slots;
 
+    if (updates.shop_for !== undefined) updates.shop_for = JSON.stringify(normalizeFilterOptions(updates.shop_for));
+    if (updates.features !== undefined) updates.features = JSON.stringify(normalizeFilterOptions(updates.features));
+
     const productColumns = new Set([
       'category_id',
       'name',
@@ -928,6 +948,8 @@ router.put('/products/:id', async (q, s) => {
       'price',
       'material',
       'subcategory',
+      'shop_for',
+      'features',
       'stock',
       'is_exclusive',
       'is_bestseller',

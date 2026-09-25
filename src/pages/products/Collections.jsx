@@ -10,7 +10,6 @@ import { fadeUp, gridParent, childFadeUp } from "../../lib/motion";
 import Seo from "../../components/Seo";
 import {
   FEATURES,
-  GENDERS,
   SHOP_FOR,
   VIBES,
   formatFilterLabel,
@@ -52,8 +51,13 @@ export default function Collections() {
   }, [params]);
 
   const apiFilters = useMemo(() => ({
-    ...filters,
+    shopFor: filters.shopFor,
+    features: filters.features,
+    vibe: filters.vibe,
     category: filters.audience ? "" : filters.category,
+    subcategory: filters.subcategory,
+    sort: filters.sort,
+    ...(filters.audience ? { gender: filters.gender } : {}),
   }), [filters]);
 
   useEffect(() => {
@@ -107,7 +111,7 @@ export default function Collections() {
     setParams(next, { replace: true });
   };
 
-  const activeFilterCount = ["gender", "shopFor", "features", "vibe", "category", "subcategory"].filter((key) => filters[key]).length;
+  const activeFilterCount = ["shopFor", "features", "vibe", "category", "subcategory"].filter((key) => filters[key]).length;
   const openMobileFilters = () => {
     if (mobileFiltersOpen) {
       setMobileFiltersOpen(false);
@@ -124,7 +128,7 @@ export default function Collections() {
   };
   const applyMobileFilters = () => {
     const next = new URLSearchParams(params);
-    ["gender", "shopFor", "features", "vibe", "category", "subcategory", "sort"].forEach((key) => {
+    ["shopFor", "features", "vibe", "category", "subcategory", "sort"].forEach((key) => {
       if (mobileDraft?.[key] && mobileDraft[key] !== (key === "sort" ? "popularity" : "")) next.set(key, mobileDraft[key]);
       else next.delete(key);
     });
@@ -156,12 +160,6 @@ export default function Collections() {
           <aside className="hidden md:block md:sticky md:top-24 h-fit border border-cocoa/10 rounded-sm p-5 bg-sand/60">
             <h2 className="text-xs uppercase tracking-widest text-cocoa/60 mb-3">Filters</h2>
 
-            <FilterGroup
-              label="Gender"
-              value={filters.gender}
-              options={GENDERS}
-              onChange={(v) => setFilter("gender", v)}
-            />
             <FilterGroup
               label="Shop For"
               value={filters.shopFor}
@@ -307,7 +305,6 @@ export default function Collections() {
                 <X size={18} />
               </button>
             </div>
-            <FilterGroup label="Gender" value={mobileDraft.gender} options={GENDERS} onChange={(value) => setMobileDraft((current) => ({ ...current, gender: value }))} />
             <FilterGroup label="Shop For" value={mobileDraft.shopFor} options={SHOP_FOR} onChange={(value) => setMobileDraft((current) => ({ ...current, shopFor: value }))} />
             <FilterGroup label="Features" value={mobileDraft.features} options={FEATURES} onChange={(value) => setMobileDraft((current) => ({ ...current, features: value }))} />
             <FilterGroup label="Vibe" value={mobileDraft.vibe} options={VIBES} onChange={(value) => setMobileDraft((current) => ({ ...current, vibe: value }))} />
