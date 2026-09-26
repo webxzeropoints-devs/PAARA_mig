@@ -282,7 +282,6 @@ export default function OrderConfirmation() {
           <LoyaltyAnimationModal
             isOpen={Boolean(loyaltyEvent)}
             stampIndex={loyaltyEvent?.state?.stampCount}
-            totalStamps={6}
             onAnimationComplete={() => {
               if (loyaltyAnimationMarkedRef.current) return;
               loyaltyAnimationMarkedRef.current = true;
@@ -293,13 +292,12 @@ export default function OrderConfirmation() {
                 });
             }}
             onClose={() => {
+              setLoyaltyEvent(null);
               if (loyaltyAnimationMarkedRef.current) {
-                setLoyaltyEvent(null);
                 return;
               }
               loyaltyAnimationMarkedRef.current = true;
               markLoyaltyAnimationShown(orderId)
-                .then(() => setLoyaltyEvent(null))
                 .catch((err) => console.error("[LOYALTY_ANIMATION_MARK_FAILED]", { orderId, message: err?.message }));
             }}
           />

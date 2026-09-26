@@ -97,22 +97,6 @@ router.post('/process-order', requireAuth, async (req, res) => {
       return res.status(error.statusCode).json({
         error: error.message,
       });
-
-      router.post('/redeem-reward', requireAuth, async (req, res) => {
-        try {
-          const result = await redeemLoyaltyReward(req.customer.id);
-          return res.status(200).json({ success: true, ...result });
-        } catch (error) {
-          if (error.statusCode) {
-            return res.status(error.statusCode).json({ error: error.message });
-          }
-          console.error('[LOYALTY_REDEEM_FAILED]', {
-            message: error.message,
-            name: error.name,
-          });
-          return res.status(500).json({ error: 'Could not redeem this loyalty reward.' });
-        }
-      });
     }
 
     console.error('[LOYALTY_PROCESS_FAILED]', {
@@ -123,6 +107,22 @@ router.post('/process-order', requireAuth, async (req, res) => {
     return res.status(500).json({
       error: 'Could not process this order for rewards.',
     });
+  }
+});
+
+router.post('/redeem-reward', requireAuth, async (req, res) => {
+  try {
+    const result = await redeemLoyaltyReward(req.customer.id);
+    return res.status(200).json({ success: true, ...result });
+  } catch (error) {
+    if (error.statusCode) {
+      return res.status(error.statusCode).json({ error: error.message });
+    }
+    console.error('[LOYALTY_REDEEM_FAILED]', {
+      message: error.message,
+      name: error.name,
+    });
+    return res.status(500).json({ error: 'Could not redeem this loyalty reward.' });
   }
 });
 

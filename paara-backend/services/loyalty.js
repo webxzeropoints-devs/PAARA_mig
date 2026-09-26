@@ -203,11 +203,34 @@ async function processLoyaltyOrder(orderId, customerId) {
     await ensureLoyaltyCard(client, customerId);
 
     let cardResult = await client.query(
-      'SELECT * FROM loyalty_cards WHERE customer_id = $1',
+      'SELECT * FROM loyalty_cards WHERE customer_id = $1 FOR UPDATE',
       [customerId]
     );
 
     let card = cardResult.rows[0];
+
+    const lockedExistingResult = await client.query(
+      'SELECT awarded_at, animation_shown_at FROM loyalty_stamps WHERE order_id = $1',
+      [orderId]
+    );
+
+    const lockedExisting = lockedExistingResult.rows[0];
+
+    if (lockedExisting) {
+      const state = await getLoyaltyState(customerId, client);
+
+      await client.query('COMMIT');
+
+      return {
+        state,
+        order: {
+          orderId,
+          awarded: true,
+          animationShown: Boolean(lockedExisting.animation_shown_at),
+          newlyAwarded: !lockedExisting.animation_shown_at,
+        },
+      };
+    }
 
     const expired =
       card?.expires_at &&
@@ -227,7 +250,7 @@ async function processLoyaltyOrder(orderId, customerId) {
       `, [customerId]);
 
       cardResult = await client.query(
-        'SELECT * FROM loyalty_cards WHERE customer_id = $1',
+        'SELECT * FROM loyalty_cards WHERE customer_id = $1 FOR UPDATE',
         [customerId]
       );
 
