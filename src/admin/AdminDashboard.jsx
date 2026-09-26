@@ -1076,6 +1076,11 @@ function ProductEditor({ product, categories, onClose, onSaved }) {
       formData.append("is_active", form.is_active);
       formData.append("release_date", form.release_date ? new Date(form.release_date).toISOString() : new Date().toISOString());
       
+      // Explicitly signal image replacement on edits, including an empty image list.
+      if (isEdit) {
+        formData.append("replace_images", "true");
+      }
+
       // Append image files
       form.images.forEach((image, index) => {
         if (image.file) {

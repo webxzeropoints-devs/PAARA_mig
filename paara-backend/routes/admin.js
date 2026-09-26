@@ -48,17 +48,15 @@ const safeUploadError = (error) => ({
 });
 
 const deleteIfUnreferenced = async (references, req) => {
-  const isManagedReference = (reference) => {
-    if (typeof mediaStore.isStratusReference === 'function') {
-      return mediaStore.isStratusReference(reference);
-    }
-
-    if (typeof mediaStore.isCatalystReference === 'function') {
-      return mediaStore.isCatalystReference(reference);
-    }
-
-    return false;
-  };
+  const isManagedReference = (reference) =>
+    (
+      typeof mediaStore.isStratusReference === 'function' &&
+      mediaStore.isStratusReference(reference)
+    ) ||
+    (
+      typeof mediaStore.isCatalystReference === 'function' &&
+      mediaStore.isCatalystReference(reference)
+    );
 
   for (
     const reference of new Set(
@@ -899,10 +897,9 @@ router.put('/products/:id', async (q, s) => {
       q
     );
 
-    const hasExistingImages = Object.prototype.hasOwnProperty.call(
-      q.body,
-      'existingImages'
-    );
+    const hasExistingImages =
+      Object.prototype.hasOwnProperty.call(q.body, 'existingImages') ||
+      normalizeFormBoolean(q.body?.replace_images, false);
 
     const existingImages = hasExistingImages
       ? (
@@ -936,6 +933,7 @@ router.put('/products/:id', async (q, s) => {
     delete updates.images;
     delete updates.upload_slots;
     delete updates.existing_slots;
+    delete updates.replace_images;
 
     if (updates.shop_for !== undefined) updates.shop_for = JSON.stringify(normalizeFilterOptions(updates.shop_for));
     if (updates.features !== undefined) updates.features = JSON.stringify(normalizeFilterOptions(updates.features));
