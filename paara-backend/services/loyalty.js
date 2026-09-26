@@ -294,10 +294,18 @@ async function processLoyaltyOrder(orderId, customerId) {
       customerId,
     ]);
 
-    await client.query(
-      'INSERT INTO loyalty_stamps (customer_id, order_id) VALUES ($1, $2)',
+    const stampResult = await client.query(
+      'INSERT INTO loyalty_stamps (customer_id, order_id) VALUES ($1, $2) RETURNING id',
       [customerId, orderId]
     );
+    const stampId = stampResult.rows[0].id;
+
+    await client.query(`
+      INSERT INTO loyalty_stamp_email_notifications
+        (stamp_id, stamp_count)
+      VALUES ($1, $2)
+      ON CONFLICT (stamp_id) DO NOTHING
+    `, [stampId, Math.min(nextCount, CARD_SIZE)]);
 
     const state = await getLoyaltyState(customerId, client);
 

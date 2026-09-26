@@ -19,6 +19,7 @@ const { requireAdminSession } = require('./middleware/adminAuth');
 const { maskSensitiveText } = require('./utils/validate');
 const { formatOrderNumber } = require('./utils/orderNumber');
 const mediaStore = require('./utils/mediaStore');
+const { createLoyaltyStampEmailWorker } = require('./services/loyaltyStampEmailNotifications');
 
 const productsRouter = require('./routes/products');
 const vaultRouter = require('./routes/vault');
@@ -35,6 +36,7 @@ const couponsRouter = require('./routes/coupons');
 const homepageRouter = require('./routes/homepage');
 const loyaltyRouter = require('./routes/loyalty');
 const paaraStoryRouter = require('./routes/paaraStory');
+const loyaltyStampEmailWorker = createLoyaltyStampEmailWorker();
 
 const app = express();
 
@@ -381,6 +383,9 @@ if (db.isServerless) {
 
       await db.ensureLoyaltySettingsTable();
       console.log('[DB] Loyalty settings table verified.');
+
+      loyaltyStampEmailWorker.start();
+      console.log('[LOYALTY_EMAIL_OUTBOX] Worker started.');
     } catch (error) {
       console.error('[DB] Failed to initialize database tables:', error.message);
     }
@@ -400,6 +405,7 @@ if (db.isServerless) {
     if (shuttingDown) return;
     shuttingDown = true;
     console.log('Received kill signal, shutting down gracefully.');
+    loyaltyStampEmailWorker.stop();
     const forceTimer = setTimeout(() => {
       console.error('Could not close connections in time, forcefully shutting down');
       try { db.close(); } catch { /* already closed */ }

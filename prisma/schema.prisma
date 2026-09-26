@@ -102,6 +102,7 @@ model Customer {
   orders               Order[]
   loyaltyCard          LoyaltyCard?
   loyaltyStamps        LoyaltyStamp[]
+  loyaltyStampEmailNotifications LoyaltyStampEmailNotification[]
   loyaltyRewardRedemptions LoyaltyRewardRedemption[]
   wishlists            Wishlist[]
 
@@ -265,9 +266,29 @@ model LoyaltyStamp {
 
   customer           Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
   order              Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  emailNotification  LoyaltyStampEmailNotification?
 
   @@index([customerId, awardedAt], map: "idx_loyalty_stamps_customer")
   @@map("loyalty_stamps")
+}
+
+model LoyaltyStampEmailNotification {
+  id             Int          @id @default(autoincrement())
+  stampId        Int          @unique @map("stamp_id")
+  stampCount     Int          @map("stamp_count")
+  status         String       @default("pending")
+  attempts       Int          @default(0)
+  nextAttemptAt  String       @default(dbgenerated("to_char(CURRENT_TIMESTAMP, 'YYYY-MM-DD HH24:MI:SS')")) @map("next_attempt_at")
+  claimedAt      String?      @map("claimed_at")
+  sentAt         String?      @map("sent_at")
+  lastError      String?      @map("last_error")
+  createdAt      String       @default(dbgenerated("to_char(CURRENT_TIMESTAMP, 'YYYY-MM-DD HH24:MI:SS')")) @map("created_at")
+  updatedAt      String       @default(dbgenerated("to_char(CURRENT_TIMESTAMP, 'YYYY-MM-DD HH24:MI:SS')")) @map("updated_at")
+
+  stamp          LoyaltyStamp @relation(fields: [stampId], references: [id], onDelete: Cascade)
+
+  @@index([status, nextAttemptAt], map: "idx_loyalty_stamp_email_due")
+  @@map("loyalty_stamp_email_notifications")
 }
 
 model LoyaltyRewardRedemption {
