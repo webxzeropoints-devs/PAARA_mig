@@ -142,9 +142,13 @@ app.get('/media/*', async (req, res) => {
     if (!media) {
       return res.status(404).end();
     }
+    if (!media.contentType.startsWith('image/')) {
+      return res.status(415).end();
+    }
 
     res.set('Content-Type', media.contentType);
-    res.set('Content-Length', String(media.buffer.length));
+    res.set('Content-Length', String(media.buffer.byteLength));
+    res.set('X-Content-Type-Options', 'nosniff');
 
     return res.end(media.buffer);
   } catch (error) {

@@ -41,6 +41,104 @@ const cleanImages = (images) => (Array.isArray(images)
   ? images.map((image) => String(image || '').trim()).filter(Boolean)
   : []);
 
+const imageError = (message, code = 'INVALID_IMAGE_REQUEST') =>
+  Object.assign(new Error(message), { code });
+
+const parseReplacementFlag = (value) => {
+  if (value === undefined) return false;
+  if (typeof value === 'boolean') return value;
+  if (typeof value === 'string') {
+    const normalized = value.trim().toLowerCase();
+    if (['true', '1', 'yes', 'on'].includes(normalized)) return true;
+    if (['false', '0', 'no', 'off'].includes(normalized)) return false;
+  }
+  throw imageError(
+    'replace_images must be a boolean value.',
+    'INVALID_IMAGE_REPLACEMENT_FLAG'
+  );
+};
+
+const parseProductBoolean = (value, fieldName) => {
+  if (typeof value === 'boolean') return value;
+  if (typeof value === 'string') {
+    const normalized = value.trim().toLowerCase();
+    if (['true', '1', 'yes', 'on'].includes(normalized)) return true;
+    if (['false', '0', 'no', 'off'].includes(normalized)) return false;
+  }
+  throw imageError(`${fieldName} must be a boolean value.`, 'INVALID_PRODUCT_FIELDS');
+};
+
+const parseImageList = (value, fieldName) => {
+  if (value === undefined) return [];
+  const items = Array.isArray(value) ? value : [value];
+  if (items.some((item) => typeof item !== 'string' || !item.trim())) {
+    throw imageError(`${fieldName} contains an invalid image reference.`);
+  }
+  return items.map((item) => item.trim());
+};
+
+const normalizeImageReferences = (images, req) =>
+  images.map((image) => {
+    const reference = mediaStore.toStorageReference(image, req);
+    if (
+      !mediaStore.isStratusReference(reference) &&
+      !mediaStore.isCatalystReference(reference) &&
+      !mediaStore.isSafeExternalImageReference(reference)
+    ) {
+      throw imageError('The image reference is invalid.', 'INVALID_IMAGE_REFERENCE');
+    }
+    return reference;
+  });
+
+const parseImageSlots = (value, expectedCount, fieldName) => {
+  if (value === undefined) return null;
+  const values = Array.isArray(value) ? value : [value];
+  if (values.length !== expectedCount) {
+    throw imageError(`${fieldName} must match the number of images.`);
+  }
+
+  const slots = values.map((value) => {
+    const text = String(value);
+    if (!/^(0|[1-9]\d*)$/.test(text)) {
+      throw imageError(`${fieldName} must contain non-negative integer slots.`);
+    }
+    const slot = Number(text);
+    if (!Number.isSafeInteger(slot)) {
+      throw imageError(`${fieldName} contains an invalid slot.`);
+    }
+    return slot;
+  });
+
+  if (new Set(slots).size !== slots.length) {
+    throw imageError(`${fieldName} cannot contain duplicate slots.`);
+  }
+  return slots;
+};
+
+const ensureManagedImagesExist = async (images, req) => {
+  for (const image of images) {
+    if (
+      mediaStore.isStratusReference(image) ||
+      mediaStore.isCatalystReference(image)
+    ) {
+      if (!await mediaStore.referenceExists(image, req)) {
+        throw imageError(
+          'A retained image is missing from storage.',
+          'IMAGE_REFERENCE_NOT_FOUND'
+        );
+      }
+    }
+  }
+};
+
+const sameImageSnapshot = (left, right) =>
+  left.length === right.length &&
+  left.every((row, index) =>
+    Number(row.id) === Number(right[index].id) &&
+    row.image_url === right[index].image_url &&
+    Number(row.sort_order) === Number(right[index].sort_order)
+  );
+
 const safeUploadError = (error) => ({
   message: error?.message || 'Image storage failed.',
   code: error?.code || 'MEDIA_STORAGE_FAILED',
@@ -63,14 +161,23 @@ const deleteIfUnreferenced = async (references, req) => {
       references.filter(isManagedReference)
     )
   ) {
+    const candidates = mediaStore.publicUrlsForReference(reference, req);
     const result = await db.query(`
-      SELECT 1 FROM product_images WHERE image_url = $1
-      UNION ALL SELECT 1 FROM instagram_reviews WHERE image_url = $1
-      UNION ALL SELECT 1 FROM paara_irl WHERE image_url = $1 OR owner_image_url = $1
-      UNION ALL SELECT 1 FROM collection_tiles WHERE image_url = $1
-      UNION ALL SELECT 1 FROM admins WHERE profile_image_url = $1
+      SELECT 1 FROM product_images WHERE image_url = ANY($1::text[])
+      UNION ALL SELECT 1 FROM products
+        WHERE EXISTS (
+          SELECT 1
+          FROM unnest($1::text[]) AS image_reference(value)
+          WHERE strpos(products.images_json, to_json(image_reference.value)::text) > 0
+        )
+      UNION ALL SELECT 1 FROM instagram_reviews WHERE image_url = ANY($1::text[])
+      UNION ALL SELECT 1 FROM paara_irl
+        WHERE image_url = ANY($1::text[])
+           OR owner_image_url = ANY($1::text[])
+      UNION ALL SELECT 1 FROM collection_tiles WHERE image_url = ANY($1::text[])
+      UNION ALL SELECT 1 FROM admins WHERE profile_image_url = ANY($1::text[])
       LIMIT 1
-    `, [reference]);
+    `, [candidates]);
 
     if (result.rowCount === 0) {
       await mediaStore.deleteReference(reference, req);
@@ -108,7 +215,6 @@ const decorate = async (rows) => {
 
 const writeImages = async (id, images, client = db) => {
   const clean = cleanImages(images);
-  if (!clean) return;
 
   await client.query(
     'DELETE FROM product_images WHERE product_id = $1',
@@ -124,23 +230,31 @@ const writeImages = async (id, images, client = db) => {
 };
 const asFiles = (files) => (Array.isArray(files) ? files : files ? [files] : []);
 
-const parseSlots = (value) => {
-  if (Array.isArray(value)) return value.map((slot) => Number.parseInt(slot, 10));
-  if (value === undefined || value === null || value === '') return [];
-  return [Number.parseInt(value, 10)];
-};
-
 const orderedImageUrls = ({ uploadedImages, existingImages, uploadSlots, existingSlots }) => {
   const slots = new Map();
+  const add = (slot, image) => {
+    if (!Number.isSafeInteger(slot) || slot < 0 || slots.has(slot)) {
+      throw imageError('Image slots must be unique non-negative integers.');
+    }
+    slots.set(slot, image);
+  };
+
   uploadedImages.forEach((url, index) => {
-    const slot = Number.isInteger(uploadSlots[index]) ? uploadSlots[index] : index;
-    slots.set(slot, url);
+    const slot = uploadSlots ? uploadSlots[index] : index;
+    add(slot, url);
   });
-  existingImages.map(mediaStore.toStorageReference).forEach((url, index) => {
-    const slot = Number.isInteger(existingSlots[index]) ? existingSlots[index] : uploadedImages.length + index;
-    slots.set(slot, url);
+  existingImages.forEach((url, index) => {
+    const slot = existingSlots
+      ? existingSlots[index]
+      : uploadedImages.length + index;
+    add(slot, url);
   });
-  return [...slots.entries()].sort(([left], [right]) => left - right).map(([, url]) => url);
+
+  const ordered = [...slots.entries()].sort(([left], [right]) => left - right);
+  if (ordered.some(([slot], index) => slot !== index)) {
+    throw imageError('Image slots must form a continuous sequence starting at zero.');
+  }
+  return ordered.map(([, url]) => url);
 };
 
 const saveUploadedImages = async (files, req) => {
@@ -157,13 +271,31 @@ const saveUploadedImages = async (files, req) => {
 
     return uploaded.map((item) => item.reference);
   } catch (error) {
-    await Promise.allSettled(
+    const cleanupResults = await Promise.allSettled(
       uploaded.map((item) =>
         mediaStore.deleteReference(item.reference, req)
       )
     );
+    cleanupResults.forEach((result, index) => {
+      if (result.status === 'rejected') {
+        mediaStore.safeCleanupDiagnostic(
+          uploaded[index].reference,
+          result.reason
+        );
+      }
+    });
 
     throw error;
+  }
+};
+
+const cleanupReferences = async (references, req) => {
+  for (const reference of new Set(references)) {
+    try {
+      await deleteIfUnreferenced([reference], req);
+    } catch (error) {
+      mediaStore.safeCleanupDiagnostic(reference, error);
+    }
   }
 };
 
@@ -722,6 +854,8 @@ router.post('/vault', async (q, s) => {
   }
 });
 router.post('/products', async (q, s) => {
+  let uploadedImages = [];
+  let committed = false;
   try {
     const {
       category_id,
@@ -739,26 +873,29 @@ router.post('/products', async (q, s) => {
       is_active = true,
       is_vault = false,
       release_date,
-    } = q.body;
+    } = q.body || {};
 
     const normalizedCategoryId = Number(category_id);
     const normalizedPrice = Number(price);
     const normalizedStock = Number(stock);
-    const normalizedIsExclusive = normalizeFormBoolean(is_exclusive, false);
-    const normalizedIsBestseller = normalizeFormBoolean(is_bestseller, false);
-    const normalizedIsActive = normalizeFormBoolean(is_active, true);
-    const normalizedIsVault = normalizeFormBoolean(is_vault, false);
+    const normalizedIsExclusive = parseProductBoolean(is_exclusive, 'is_exclusive');
+    const normalizedIsBestseller = parseProductBoolean(is_bestseller, 'is_bestseller');
+    const normalizedIsActive = parseProductBoolean(is_active, 'is_active');
+    const normalizedIsVault = parseProductBoolean(is_vault, 'is_vault');
+
+    if (!Number.isInteger(normalizedCategoryId) || normalizedCategoryId < 1) {
+      return s.status(400).json({
+        error: 'A valid category is required.',
+        code: 'INVALID_CATEGORY_ID',
+      });
+    }
 
     const categoryResult = await db.query(
       'SELECT 1 FROM categories WHERE id = $1',
       [normalizedCategoryId]
     );
 
-    if (
-      !Number.isInteger(normalizedCategoryId) ||
-      normalizedCategoryId < 1 ||
-      categoryResult.rowCount === 0
-    ) {
+    if (categoryResult.rowCount === 0) {
       return s.status(400).json({
         error: 'A valid category is required.',
         code: 'INVALID_CATEGORY_ID',
@@ -785,86 +922,119 @@ router.post('/products', async (q, s) => {
     }
 
     const filesArray = asFiles(q.files);
-    let uploadedImages = [];
-
-    try {
-      uploadedImages = await saveUploadedImages(filesArray, q);
-    } catch (imgErr) {
-      const uploadError = safeUploadError(imgErr);
-      console.error('[ADMIN_UPLOAD_ERROR]', uploadError);
-
+    if (filesArray.length > 3) {
       return s.status(400).json({
-        error: `Could not store uploaded images: ${uploadError.message}`,
-        code: uploadError.code,
+        error: 'No more than 3 image files can be uploaded at once.',
+        code: 'TOO_MANY_IMAGE_FILES',
       });
     }
 
-    const hasExistingImages = Object.prototype.hasOwnProperty.call(
-      q.body,
-      'existingImages'
+    parseReplacementFlag(q.body?.replace_images);
+    const existingImages = normalizeImageReferences(
+      parseImageList(
+        Object.prototype.hasOwnProperty.call(q.body || {}, 'existingImages')
+          ? q.body.existingImages
+          : undefined,
+        'existingImages'
+      ),
+      q
     );
+    const uploadSlots = parseImageSlots(
+      q.body?.upload_slots,
+      filesArray.length,
+      'upload_slots'
+    );
+    const existingSlots = parseImageSlots(
+      q.body?.existing_slots,
+      existingImages.length,
+      'existing_slots'
+    );
+    const placeholderImages = filesArray.map((_, index) => `upload:${index}`);
+    const imageSlots = orderedImageUrls({
+      uploadedImages: placeholderImages,
+      existingImages,
+      uploadSlots,
+      existingSlots,
+    });
+    await ensureManagedImagesExist(existingImages, q);
 
-    const existingImages = hasExistingImages
-      ? (
-          Array.isArray(q.body.existingImages)
-            ? q.body.existingImages
-            : [q.body.existingImages]
-        )
-      : [];
+    uploadedImages = await saveUploadedImages(filesArray, q);
 
     const allImages = orderedImageUrls({
       uploadedImages,
       existingImages,
-      uploadSlots: parseSlots(q.body?.upload_slots),
-      existingSlots: parseSlots(q.body?.existing_slots),
+      uploadSlots,
+      existingSlots,
     });
+    if (allImages.length !== imageSlots.length) {
+      throw imageError('The submitted image list is inconsistent.');
+    }
 
-    const result = await db.query(`
-      INSERT INTO products (
-        category_id,
-        name,
-        slug,
+    const client = await db.pool.connect();
+    let product;
+    try {
+      await client.query('BEGIN');
+      const result = await client.query(`
+        INSERT INTO products (
+          category_id,
+          name,
+          slug,
+          description,
+          price,
+          material,
+          subcategory,
+          shop_for,
+          features,
+          stock,
+          is_exclusive,
+          is_bestseller,
+          is_active,
+          is_vault,
+          release_date
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+        RETURNING *
+      `, [
+        normalizedCategoryId,
+        String(name).trim(),
+        String(slug).trim(),
         description,
-        price,
+        normalizedPrice,
         material,
         subcategory,
-        shop_for,
-        features,
-        stock,
-        is_exclusive,
-        is_bestseller,
-        is_active,
-        is_vault,
-        release_date
-      )
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
-      RETURNING *
-    `, [
-      normalizedCategoryId,
-      String(name).trim(),
-      String(slug).trim(),
-      description,
-      normalizedPrice,
-      material,
-      subcategory,
-      JSON.stringify(normalizeFilterOptions(shop_for)),
-      JSON.stringify(normalizeFilterOptions(features)),
-      normalizedStock,
-      normalizedIsExclusive,
-      normalizedIsBestseller,
-      normalizedIsActive,
-      normalizedIsVault,
-      release_date || new Date().toISOString().replace('T', ' ').replace(/\.\d{3}Z$/, ''),
-    ]);
+        JSON.stringify(normalizeFilterOptions(shop_for)),
+        JSON.stringify(normalizeFilterOptions(features)),
+        normalizedStock,
+        normalizedIsExclusive,
+        normalizedIsBestseller,
+        normalizedIsActive,
+        normalizedIsVault,
+        release_date || new Date().toISOString().replace('T', ' ').replace(/\.\d{3}Z$/, ''),
+      ]);
 
-    const product = result.rows[0];
-
-    await writeImages(product.id, allImages);
+      product = result.rows[0];
+      await writeImages(product.id, allImages, client);
+      await client.query('COMMIT');
+      committed = true;
+    } catch (error) {
+      try {
+        await client.query('ROLLBACK');
+      } catch (rollbackError) {
+        console.error('[ADMIN_PRODUCT_CREATE_ROLLBACK_FAILED]', {
+          code: rollbackError.code || 'DATABASE_ROLLBACK_FAILED',
+        });
+      }
+      throw error;
+    } finally {
+      client.release();
+    }
 
     const decorated = await decorate([product]);
-
     return s.status(201).json(decorated[0]);
   } catch (err) {
+    if (!committed && uploadedImages.length) {
+      await cleanupReferences(uploadedImages, q);
+    }
     const productError = safeUploadError(err);
     console.error('[ADMIN_CRUD_ERROR]', productError);
 
@@ -876,6 +1046,8 @@ router.post('/products', async (q, s) => {
 });
 
 router.put('/products/:id', async (q, s) => {
+  let uploadedImages = [];
+  let committed = false;
   try {
     const currentResult = await db.query(
       'SELECT * FROM products WHERE id = $1',
@@ -889,46 +1061,67 @@ router.put('/products/:id', async (q, s) => {
     }
 
     const previousImages = await db.query(
-      'SELECT image_url FROM product_images WHERE product_id = $1',
+      `SELECT id, image_url, sort_order
+       FROM product_images
+       WHERE product_id = $1
+       ORDER BY sort_order ASC, id ASC`,
       [q.params.id]
     );
-    const uploadedImages = await saveUploadedImages(
-      asFiles(q.files),
-      q
+
+    const replaceImages = parseReplacementFlag(q.body?.replace_images);
+    const hasExistingImages = Object.prototype.hasOwnProperty.call(
+      q.body || {},
+      'existingImages'
     );
-
-    const hasExistingImages =
-      Object.prototype.hasOwnProperty.call(q.body, 'existingImages') ||
-      normalizeFormBoolean(q.body?.replace_images, false);
-
-    const existingImages = hasExistingImages
-      ? (
-          Array.isArray(q.body.existingImages)
-            ? q.body.existingImages
-            : [q.body.existingImages]
-        )
-      : [];
-
-    const allImages = orderedImageUrls({
-      uploadedImages,
-      existingImages,
-      uploadSlots: parseSlots(q.body?.upload_slots),
-      existingSlots: parseSlots(q.body?.existing_slots),
-    });
-
-    const updates = { ...q.body };
-
-    if (uploadedImages.length > 0 || hasExistingImages) {
-      await writeImages(q.params.id, allImages);
-    
-      await deleteIfUnreferenced(
-        previousImages.rows
-          .map((row) => row.image_url)
-          .filter((image) => !allImages.includes(image)),
-        q
+    const filesArray = asFiles(q.files);
+    if (filesArray.length > 3) {
+      throw imageError(
+        'No more than 3 image files can be uploaded at once.',
+        'TOO_MANY_IMAGE_FILES'
       );
     }
+    const existingImages = normalizeImageReferences(
+      hasExistingImages
+        ? parseImageList(q.body.existingImages, 'existingImages')
+        : [],
+      q
+    );
+    const uploadSlots = parseImageSlots(
+      q.body?.upload_slots,
+      filesArray.length,
+      'upload_slots'
+    );
+    const existingSlots = parseImageSlots(
+      q.body?.existing_slots,
+      existingImages.length,
+      'existing_slots'
+    );
+    const replacementRequested =
+      replaceImages || hasExistingImages || filesArray.length > 0;
+    if (
+      !replacementRequested &&
+      (q.body?.upload_slots !== undefined || q.body?.existing_slots !== undefined)
+    ) {
+      throw imageError('Image slots were submitted without an image replacement.');
+    }
 
+    const previousReferences = previousImages.rows.map((row) => row.image_url);
+    const previousReferenceSet = new Set(previousReferences);
+    for (const image of existingImages) {
+      if (
+        (mediaStore.isStratusReference(image) ||
+          mediaStore.isCatalystReference(image)) &&
+        !previousReferenceSet.has(image)
+      ) {
+        throw imageError(
+          'Only images already assigned to this product can be retained.',
+          'INVALID_IMAGE_REFERENCE'
+        );
+      }
+    }
+    await ensureManagedImagesExist(existingImages, q);
+
+    const updates = { ...q.body };
     delete updates.existingImages;
     delete updates.images;
     delete updates.upload_slots;
@@ -1013,16 +1206,28 @@ router.put('/products/:id', async (q, s) => {
     ['is_exclusive', 'is_bestseller', 'is_active', 'is_vault'].forEach(
       (key) => {
         if (Object.prototype.hasOwnProperty.call(updates, key)) {
-          updates[key] = normalizeFormBoolean(updates[key], false);
+          updates[key] = parseProductBoolean(updates[key], key);
         }
       }
     );
 
     if (updates.price !== undefined) {
+      if (typeof updates.price === 'string' && !updates.price.trim()) {
+        return s.status(400).json({
+          error: 'Product price must be a valid non-negative number.',
+          code: 'INVALID_PRODUCT_NUMBERS',
+        });
+      }
       updates.price = Number(updates.price);
     }
 
     if (updates.stock !== undefined) {
+      if (typeof updates.stock === 'string' && !updates.stock.trim()) {
+        return s.status(400).json({
+          error: 'Product stock must be a valid non-negative number.',
+          code: 'INVALID_PRODUCT_NUMBERS',
+        });
+      }
       updates.stock = Number(updates.stock);
     }
 
@@ -1046,6 +1251,55 @@ router.put('/products/:id', async (q, s) => {
       });
     }
 
+    const placeholders = filesArray.map((_, index) => `upload:${index}`);
+    const plannedImages = replacementRequested
+      ? orderedImageUrls({
+          uploadedImages: placeholders,
+          existingImages,
+          uploadSlots,
+          existingSlots,
+        })
+      : null;
+
+    uploadedImages = await saveUploadedImages(filesArray, q);
+    const allImages = replacementRequested
+      ? orderedImageUrls({
+          uploadedImages,
+          existingImages,
+          uploadSlots,
+          existingSlots,
+        })
+      : null;
+    if (plannedImages && allImages && plannedImages.length !== allImages.length) {
+      throw imageError('The submitted image list is inconsistent.');
+    }
+
+    const client = await db.pool.connect();
+    let updatedProduct;
+    try {
+      await client.query('BEGIN');
+      const lockedProduct = await client.query(
+        'SELECT id FROM products WHERE id = $1 FOR UPDATE',
+        [q.params.id]
+      );
+      if (lockedProduct.rowCount === 0) {
+        throw imageError('Product not found.', 'PRODUCT_NOT_FOUND');
+      }
+      const lockedImages = await client.query(
+        `SELECT id, image_url, sort_order
+         FROM product_images
+         WHERE product_id = $1
+         ORDER BY sort_order ASC, id ASC
+         FOR UPDATE`,
+        [q.params.id]
+      );
+      if (!sameImageSnapshot(previousImages.rows, lockedImages.rows)) {
+        throw imageError(
+          'Product images changed while this update was being prepared. Reload and try again.',
+          'IMAGE_LIST_CHANGED'
+        );
+      }
+
     const updateKeys = Object.keys(updates);
 
     if (updateKeys.length > 0) {
@@ -1056,70 +1310,127 @@ router.put('/products/:id', async (q, s) => {
 
       values.push(q.params.id);
 
-      await db.query(
+      await client.query(
         `UPDATE products SET ${setClause} WHERE id = $${values.length}`,
         values
       );
     }
 
-    const updatedResult = await db.query(
-      'SELECT * FROM products WHERE id = $1',
-      [q.params.id]
-    );
+      if (replacementRequested) {
+        await writeImages(q.params.id, allImages, client);
+      }
 
-    const decorated = await decorate(updatedResult.rows);
+      const updatedResult = await client.query(
+        'SELECT * FROM products WHERE id = $1',
+        [q.params.id]
+      );
+      updatedProduct = updatedResult.rows[0];
+      await client.query('COMMIT');
+      committed = true;
+    } catch (error) {
+      try {
+        await client.query('ROLLBACK');
+      } catch (rollbackError) {
+        console.error('[ADMIN_PRODUCT_UPDATE_ROLLBACK_FAILED]', {
+          code: rollbackError.code || 'DATABASE_ROLLBACK_FAILED',
+        });
+      }
+      throw error;
+    } finally {
+      client.release();
+    }
+
+    if (replacementRequested) {
+      await cleanupReferences(
+        previousReferences.filter((image) => !allImages.includes(image)),
+        q
+      );
+    }
+
+    const decorated = await decorate([updatedProduct]);
 
     return s.json(decorated[0]);
   } catch (err) {
+    if (!committed && uploadedImages.length) {
+      await cleanupReferences(uploadedImages, q);
+    }
     const productError = safeUploadError(err);
     console.error('[ADMIN_CRUD_ERROR]', productError);
 
-    return s.status(400).json({
+    return s.status(err.status || (err.code === 'PRODUCT_NOT_FOUND' ? 404 : err.code === 'IMAGE_LIST_CHANGED' ? 409 : 400)).json({
       error: `Could not update the product: ${productError.message}`,
       code: productError.code,
     });
   }
 });
 router.delete('/products/:id', async (q, s) => {
+  let client;
+  let images = [];
   try {
-    const orderReference = await db.query(
-      'SELECT 1 FROM order_items WHERE product_id = $1 LIMIT 1',
+    client = await db.pool.connect();
+    await client.query('BEGIN');
+    const product = await client.query(
+      'SELECT id FROM products WHERE id = $1 FOR UPDATE',
       [q.params.id]
     );
-
-    if (orderReference.rowCount > 0) {
-      return s.status(409).json({
-        error: 'This product is referenced by an order and cannot be deleted.',
-      });
-    }
-
-    const images = await db.query(
-      'SELECT image_url FROM product_images WHERE product_id = $1',
-      [q.params.id]
-    );
-    const result = await db.query(
-      'DELETE FROM products WHERE id = $1 RETURNING id',
-      [q.params.id]
-    );
-
-    if (result.rowCount === 0) {
+    if (product.rowCount === 0) {
+      await client.query('ROLLBACK');
       return s.status(404).json({
         error: 'Product not found.',
       });
     }
 
-    await deleteIfUnreferenced(
-      images.rows.map((row) => row.image_url),
-      q
+    const orderReference = await client.query(
+      'SELECT 1 FROM order_items WHERE product_id = $1 LIMIT 1',
+      [q.params.id]
     );
-    return s.json({ success: true });
+
+    if (orderReference.rowCount > 0) {
+      await client.query('ROLLBACK');
+      return s.status(409).json({
+        error: 'This product is referenced by an order and cannot be deleted.',
+      });
+    }
+
+    const imageResult = await client.query(
+      'SELECT image_url FROM product_images WHERE product_id = $1',
+      [q.params.id]
+    );
+    images = imageResult.rows.map((row) => row.image_url);
+    const result = await client.query(
+      'DELETE FROM products WHERE id = $1 RETURNING id',
+      [q.params.id]
+    );
+
+    if (result.rowCount === 0) {
+      await client.query('ROLLBACK');
+      return s.status(404).json({
+        error: 'Product not found.',
+      });
+    }
+
+    await client.query('COMMIT');
   } catch (error) {
+    if (client) {
+      try {
+        await client.query('ROLLBACK');
+      } catch (rollbackError) {
+        console.error('[ADMIN_PRODUCT_DELETE_ROLLBACK_FAILED]', {
+          code: rollbackError.code || 'DATABASE_ROLLBACK_FAILED',
+        });
+      }
+    }
     console.error('[ADMIN_PRODUCT_DELETE_FAILED]', error.message);
 
     return s.status(400).json({
       error: 'Could not delete the product.',
     });
+  } finally {
+    if (client) client.release();
   }
+
+  await cleanupReferences(images, q);
+  return s.json({ success: true });
 });
 
 const keys = ['pearls', 'gold', 'ocean'];
@@ -1331,10 +1642,10 @@ router.put('/paara-irl', async (q, s) => {
     );
 
     const nextImageUrl =
-      uploadedBySlot.image || mediaStore.toStorageReference(image_url);
+      uploadedBySlot.image || mediaStore.toStorageReference(image_url, q);
 
     const nextOwnerImageUrl =
-      uploadedBySlot.owner || mediaStore.toStorageReference(owner_image_url);
+      uploadedBySlot.owner || mediaStore.toStorageReference(owner_image_url, q);
 
     if (
       String(image_url || '').startsWith('data:') &&
@@ -1617,7 +1928,7 @@ router.put('/worn-by-you', async (q, s) => {
 
         const imageUrl =
           uploadedBySlot[String(slotIndex)] ||
-          mediaStore.toStorageReference(slot.image_url) ||
+          mediaStore.toStorageReference(slot.image_url, q) ||
           '';
 
         const caption = slot.caption || null;
@@ -2529,7 +2840,6 @@ router.post('/orders/:id/grant-gift-card', async (q, s) => {
 });
 module.exports = router;
 module.exports.normalizeFormBoolean = normalizeFormBoolean;
-
-
-
-
+module.exports.parseReplacementFlag = parseReplacementFlag;
+module.exports.parseImageSlots = parseImageSlots;
+module.exports.orderedImageUrls = orderedImageUrls;

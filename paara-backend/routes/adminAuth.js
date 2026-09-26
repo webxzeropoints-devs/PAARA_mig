@@ -2,6 +2,7 @@ const express = require('express');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const db = require('../db/database.pg');
+const mediaStore = require('../utils/mediaStore');
 const { requireAdminSession } = require('../middleware/adminAuth');
 const { issuePasswordResetOtp, consumePasswordResetOtp, markPasswordResetOtpUsed } = require('../utils/passwordReset');
 const { normalizeEmail } = require('../utils/emailOtp');
@@ -312,15 +313,27 @@ router.put('/change-email', requireAdminSession, async (req, res) => {
 router.put('/profile-picture', requireAdminSession, async (req, res) => {
   const { image_url } = req.body;
 
-  if (!image_url) {
+  if (typeof image_url !== 'string' || !image_url.trim()) {
     return res.status(400).json({
       error: 'image_url is required.'
     });
   }
 
+  let storedImageUrl = image_url.trim();
+  if (!storedImageUrl.startsWith('data:')) {
+    try {
+      storedImageUrl = mediaStore.toStorageReference(storedImageUrl, req);
+    } catch (error) {
+      return res.status(400).json({
+        error: error.message || 'The image URL is invalid.',
+        code: error.code || 'INVALID_IMAGE_REFERENCE',
+      });
+    }
+  }
+
   await db.query(
     'UPDATE admins SET profile_image_url = $1 WHERE id = $2',
-    [image_url, req.admin.id]
+    [storedImageUrl, req.admin.id]
   );
 
   res.json({ success: true });

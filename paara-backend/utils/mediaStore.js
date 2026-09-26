@@ -14,6 +14,15 @@ const ALLOWED_IMAGE_TYPES = new Set([
   'image/avif',
 ]);
 
+const IMAGE_EXTENSIONS = new Map([
+  ['image/jpeg', '.jpg'],
+  ['image/png', '.png'],
+  ['image/gif', '.gif'],
+  ['image/webp', '.webp'],
+  ['image/svg+xml', '.svg'],
+  ['image/avif', '.avif'],
+]);
+
 function getCatalystApp(req) {
   try {
     const catalyst = require('zcatalyst-sdk-node');
@@ -88,6 +97,52 @@ function sanitizeExtension(value) {
   return safeExtension || '.bin';
 }
 
+function detectImageContentType(buffer) {
+  if (!Buffer.isBuffer(buffer) || buffer.length === 0) return null;
+
+  if (
+    buffer.length >= 3 &&
+    buffer[0] === 0xff &&
+    buffer[1] === 0xd8 &&
+    buffer[2] === 0xff
+  ) return 'image/jpeg';
+
+  if (
+    buffer.length >= 8 &&
+    buffer.subarray(0, 8).equals(
+      Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])
+    )
+  ) return 'image/png';
+
+  if (['GIF87a', 'GIF89a'].includes(buffer.subarray(0, 6).toString('ascii'))) {
+    return 'image/gif';
+  }
+
+  if (
+    buffer.length >= 12 &&
+    buffer.subarray(0, 4).toString('ascii') === 'RIFF' &&
+    buffer.subarray(8, 12).toString('ascii') === 'WEBP'
+  ) return 'image/webp';
+
+  if (
+    buffer.length >= 12 &&
+    buffer.subarray(4, 8).toString('ascii') === 'ftyp' &&
+    /^(avif|avis)$/.test(buffer.subarray(8, 12).toString('ascii'))
+  ) return 'image/avif';
+
+  const svgPrefix = buffer
+    .toString('utf8', 0, 4096)
+    .replace(/^\uFEFF/, '')
+    .trimStart()
+    .replace(/^(?:<\?xml[\s\S]*?\?>\s*)?(?:<!--[\s\S]*?-->\s*)*/i, '');
+
+  if (/^<svg(?:\s|>)/i.test(svgPrefix)) {
+    return 'image/svg+xml';
+  }
+
+  return null;
+}
+
 function validateImage(file) {
   if (!file?.buffer?.length) {
     const error = new Error('The uploaded image is empty.');
@@ -109,23 +164,7 @@ function validateImage(file) {
 
   const buffer = file.buffer;
   const mimetype = String(file.mimetype || '').toLowerCase();
-  const validSignature =
-    (mimetype === 'image/jpeg' &&
-      buffer.length >= 3 &&
-      buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff) ||
-    (mimetype === 'image/png' &&
-      buffer.subarray(0, 8).equals(
-        Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])
-      )) ||
-    (mimetype === 'image/gif' &&
-      ['GIF87a', 'GIF89a'].includes(buffer.subarray(0, 6).toString('ascii'))) ||
-    (mimetype === 'image/webp' &&
-      buffer.subarray(0, 4).toString('ascii') === 'RIFF' &&
-      buffer.subarray(8, 12).toString('ascii') === 'WEBP') ||
-    (mimetype === 'image/avif' &&
-      buffer.subarray(4, 8).toString('ascii') === 'ftyp') ||
-    (mimetype === 'image/svg+xml' &&
-      buffer.toString('utf8', 0, 4096).trimStart().startsWith('<'));
+  const validSignature = detectImageContentType(buffer) === mimetype;
 
   if (!validSignature) {
     const error = new Error('The uploaded file is not a valid image.');
@@ -141,15 +180,26 @@ function validateImage(file) {
 }
 
 function isStratusReference(value) {
-  return /^stratus:/i.test(
-    String(value || '').trim()
-  );
+  const reference = String(value || '').trim();
+  if (!/^stratus:/i.test(reference)) return false;
+
+  const objectKey = reference.slice('stratus:'.length);
+  return objectKey.startsWith('products/') &&
+    !objectKey.includes('\\') &&
+    !/[^a-z0-9._/-]/i.test(objectKey) &&
+    !/[?#\u0000-\u001f]/.test(objectKey) &&
+    objectKey.split('/').every((part) => part && part !== '.' && part !== '..');
 }
 
 function isCatalystReference(value) {
-  return /^catalyst-file:/i.test(
-    String(value || '').trim()
-  );
+  const reference = String(value || '').trim();
+  if (!/^catalyst-file:/i.test(reference)) return false;
+
+  const fileId = reference.slice('catalyst-file:'.length);
+  return Boolean(fileId) &&
+    fileId !== '.' &&
+    fileId !== '..' &&
+    !/[\\/;?#\u0000-\u001f]/.test(fileId);
 }
 
 function objectKeyFromReference(value) {
@@ -162,39 +212,229 @@ function objectKeyFromReference(value) {
   return reference.slice('stratus:'.length);
 }
 
-function toStorageReference(value) {
+function trustedMediaOrigins(req) {
+  const origins = new Set();
+  const addOrigin = (value) => {
+    if (!value) return;
+    try {
+      origins.add(new URL(value).origin);
+    } catch {
+      return;
+    }
+  };
+
+  addOrigin(req?.get?.('origin'));
+  if (req?.get?.('host')) {
+    addOrigin(`${req.protocol || 'https'}://${req.get('host')}`);
+  }
+  String(process.env.FRONTEND_URL || '')
+    .split(',')
+    .map((origin) => origin.trim())
+    .filter(Boolean)
+    .forEach(addOrigin);
+  addOrigin('https://paarajewellery.in');
+  addOrigin('https://www.paarajewellery.in');
+  return origins;
+}
+
+function publicUrlsForReference(reference, req) {
+  let pathname;
+  if (isStratusReference(reference)) {
+    pathname = `/media/${reference.slice('stratus:'.length)}`;
+  } else if (isCatalystReference(reference)) {
+    pathname = `/media/${encodeURIComponent(
+      reference.slice('catalyst-file:'.length)
+    )}`;
+  } else {
+    return [];
+  }
+
+  const urls = new Set([reference, pathname]);
+  for (const origin of trustedMediaOrigins(req)) {
+    urls.add(`${origin}${pathname}`);
+  }
+  return [...urls];
+}
+
+function referenceFromMediaPath(pathname) {
+  if (!pathname.startsWith('/media/')) return null;
+
+  let objectKey;
+  try {
+    objectKey = decodeURIComponent(pathname.slice('/media/'.length));
+  } catch {
+    return null;
+  }
+
+  if (!objectKey || objectKey.includes('\\') || /[?#\u0000-\u001f]/.test(objectKey)) {
+    return null;
+  }
+  if (objectKey.startsWith('products/')) {
+    const reference = `stratus:${objectKey}`;
+    return isStratusReference(reference) ? reference : null;
+  }
+  const reference = `catalyst-file:${objectKey}`;
+  return isCatalystReference(reference) ? reference : null;
+}
+
+function isSafeExternalImageReference(value) {
   const image = String(value || '').trim();
+  if (!image || /[\\\u0000-\u001f]/.test(image)) return false;
+
+  if (/^https?:\/\//i.test(image)) {
+    try {
+      const parsed = new URL(image);
+      return Boolean(parsed.hostname) &&
+        !parsed.username &&
+        !parsed.password;
+    } catch {
+      return false;
+    }
+  }
+
+  if (/^[a-z][a-z0-9+.-]*:/i.test(image) || image.startsWith('//')) {
+    return false;
+  }
+
+  const path = image.split(/[?#]/, 1)[0];
+  return path.split('/').every((part) => part !== '..');
+}
+
+function toStorageReference(value, req) {
+  const image = String(value || '').trim();
+  if (!image) {
+    const error = new Error('An image reference cannot be empty.');
+    error.code = 'INVALID_IMAGE_REFERENCE';
+    throw error;
+  }
 
   if (isStratusReference(image)) {
     return image;
   }
+  if (/^stratus:/i.test(image)) {
+    const error = new Error('The Stratus image reference is invalid.');
+    error.code = 'INVALID_IMAGE_REFERENCE';
+    throw error;
+  }
 
-  // Preserve existing legacy Catalyst File Store references.
-  if (/^catalyst-file:[^/]+$/i.test(image)) {
+  if (isCatalystReference(image)) {
     return image;
   }
-
-  // Convert our public Stratus media URL back to the canonical
-  // database reference when an existing image is submitted again.
-  if (image.startsWith('/media/')) {
-    const objectKey = image.slice('/media/'.length);
-
-    if (!objectKey || objectKey.includes('..')) {
-      return image;
-    }
-
-    return objectKey.startsWith('products/')
-      ? `stratus:${objectKey}`
-      : `catalyst-file:${objectKey}`;
+  if (/^catalyst-file:/i.test(image)) {
+    const error = new Error('The Catalyst File Store reference is invalid.');
+    error.code = 'INVALID_IMAGE_REFERENCE';
+    throw error;
   }
 
-  // Preserve other legacy/relative image URLs.
+  let mediaPath = image;
+  let trustedAbsoluteUrl = false;
+  if (/^https?:\/\//i.test(image)) {
+    try {
+      const parsed = new URL(image);
+      if (parsed.username || parsed.password) {
+        throw new Error('Image URLs cannot contain credentials.');
+      }
+      if (trustedMediaOrigins(req).has(parsed.origin)) {
+        if (
+          parsed.pathname.startsWith('/media/') &&
+          (parsed.search || parsed.hash)
+        ) {
+          const error = new Error('Managed media URLs cannot include a query or fragment.');
+          error.code = 'INVALID_IMAGE_REFERENCE';
+          throw error;
+        }
+        mediaPath = `${parsed.pathname}${parsed.search}${parsed.hash}`;
+        trustedAbsoluteUrl = true;
+      }
+    } catch {
+      const error = new Error('The image URL is invalid.');
+      error.code = 'INVALID_IMAGE_REFERENCE';
+      throw error;
+    }
+  }
+
+  if (mediaPath.startsWith('/media/')) {
+    const reference = referenceFromMediaPath(mediaPath);
+    if (!reference) {
+      const error = new Error('The managed media URL is invalid.');
+      error.code = 'INVALID_IMAGE_REFERENCE';
+      throw error;
+    }
+    return reference;
+  }
+
+  if (/^(?:data|javascript|file):/i.test(image) || /[\u0000-\u001f]/.test(image)) {
+    const error = new Error('The image URL is not allowed.');
+    error.code = 'INVALID_IMAGE_REFERENCE';
+    throw error;
+  }
+
+  if (/^[a-z][a-z0-9+.-]*:/i.test(image) && !/^https?:\/\//i.test(image)) {
+    const error = new Error('The image URL scheme is not allowed.');
+    error.code = 'INVALID_IMAGE_REFERENCE';
+    throw error;
+  }
+
+  if (trustedAbsoluteUrl) return mediaPath;
+
+  // Keep legacy external and relative URLs as URLs, not storage keys.
   return image;
+}
+
+async function referenceExists(reference, req) {
+  if (isStratusReference(reference)) {
+    const bucket = getBucket(req);
+    if (!bucket) {
+      const error = new Error('Catalyst Stratus is not configured.');
+      error.code = 'MEDIA_STORAGE_NOT_CONFIGURED';
+      throw error;
+    }
+    try {
+      await bucket.object(objectKeyFromReference(reference)).getDetails();
+      return true;
+    } catch (error) {
+      const status = error?.status || error?.statusCode || error?.response?.status;
+      if (status === 404) return false;
+      throw error;
+    }
+  }
+
+  if (isCatalystReference(reference)) {
+    const folder = getFileStoreFolder(req);
+    if (!folder) {
+      const error = new Error('Catalyst File Store is not configured.');
+      error.code = 'MEDIA_STORAGE_NOT_CONFIGURED';
+      throw error;
+    }
+    try {
+      await folder.getFileDetails(reference.slice('catalyst-file:'.length));
+      return true;
+    } catch (error) {
+      const status = error?.status || error?.statusCode || error?.response?.status;
+      if (status === 404) return false;
+      throw error;
+    }
+  }
+
+  return true;
+}
+
+function safeCleanupDiagnostic(reference, error) {
+  console.error('[MEDIA_CLEANUP_PENDING]', {
+    provider: isStratusReference(reference)
+      ? 'stratus'
+      : isCatalystReference(reference)
+        ? 'catalyst-file'
+        : 'unmanaged',
+    reference,
+    code: error?.code || error?.status || error?.statusCode || 'MEDIA_CLEANUP_FAILED',
+  });
 }
 async function uploadImage(file, prefix = 'image', req) {
   validateImage(file);
 
-  const extension = sanitizeExtension(file.originalname);
+  const contentType = String(file.mimetype || '').toLowerCase();
+  const extension = IMAGE_EXTENSIONS.get(contentType) || sanitizeExtension(file.originalname);
 
   const filename =
     `${String(prefix)
@@ -296,7 +536,7 @@ async function streamToBuffer(stream) {
 
 async function download(reference, req) {
   const normalizedReference = String(reference || '').trim();
-  const isFileStore = /^catalyst-file:/i.test(normalizedReference);
+  const isFileStore = isCatalystReference(normalizedReference);
   const objectKey = isFileStore
     ? normalizedReference.slice('catalyst-file:'.length)
     : objectKeyFromReference(normalizedReference);
@@ -331,19 +571,12 @@ async function download(reference, req) {
     throw error;
   }
 
-  let contentType = 'application/octet-stream';
+  const contentType = detectImageContentType(buffer);
 
-  if (!isFileStore) try {
-    const object = storage.object(objectKey);
-    const details = await object.getDetails();
-
-    contentType =
-      details?.content_type ||
-      details?.mime_type ||
-      contentType;
-  } catch {
-    // The uploaded content type is already stored in Catalyst.
-    // Fall back safely if metadata lookup is unavailable.
+  if (!contentType) {
+    const error = new Error('Stored media bytes are not a supported image.');
+    error.code = 'MEDIA_CONTENT_TYPE_UNKNOWN';
+    throw error;
   }
 
   return {
@@ -354,7 +587,7 @@ async function download(reference, req) {
 
 async function deleteReference(reference, req) {
   const normalizedReference = String(reference || '').trim();
-  const isFileStore = /^catalyst-file:/i.test(normalizedReference);
+  const isFileStore = isCatalystReference(normalizedReference);
   const objectKey = isFileStore
     ? normalizedReference.slice('catalyst-file:'.length)
     : objectKeyFromReference(normalizedReference);
@@ -367,7 +600,15 @@ async function deleteReference(reference, req) {
     ? getFileStoreFolder(req)
     : getBucket(req);
 
-  if (!storage) return false;
+  if (!storage) {
+    const error = new Error(
+      isFileStore
+        ? 'Catalyst File Store is not configured.'
+        : 'Catalyst Stratus is not configured.'
+    );
+    error.code = 'MEDIA_STORAGE_NOT_CONFIGURED';
+    throw error;
+  }
 
   try {
     if (isFileStore) {
@@ -398,4 +639,9 @@ module.exports = {
   isStratusReference,
   isCatalystReference,
   toStorageReference,
+  detectImageContentType,
+  isSafeExternalImageReference,
+  publicUrlsForReference,
+  referenceExists,
+  safeCleanupDiagnostic,
 };

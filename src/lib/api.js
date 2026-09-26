@@ -42,6 +42,36 @@ export const resolveAssetUrl = (value) => {
   return `${assetOrigin}${encodedPath}`;
 };
 
+export const imageReferenceForSubmit = (value) => {
+  const source = String(value || "").trim();
+  if (!source || !/^https?:\/\//i.test(source)) return source;
+
+  try {
+    const parsed = new URL(source);
+    const trustedOrigins = new Set();
+    if (/^https?:\/\//i.test(BASE_URL)) {
+      trustedOrigins.add(new URL(BASE_URL).origin);
+    }
+    if (typeof window !== "undefined") {
+      trustedOrigins.add(window.location.origin);
+    }
+
+    if (trustedOrigins.has(parsed.origin)) {
+      if (
+        parsed.pathname.startsWith("/media/") &&
+        (parsed.search || parsed.hash)
+      ) {
+        return source;
+      }
+      return `${parsed.pathname}${parsed.search}${parsed.hash}`;
+    }
+  } catch {
+    return source;
+  }
+
+  return source;
+};
+
 const normalizeResponseAssets = (value, key = "") => {
   if (Array.isArray(value)) return value.map((item) => normalizeResponseAssets(item, key));
   if (!value || typeof value !== "object") return value;
