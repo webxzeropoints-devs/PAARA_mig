@@ -1286,7 +1286,7 @@ function ProductEditor({ product, categories, onClose, onSaved }) {
               disabled={form.images.length >= 5}
               className="mt-3 text-xs uppercase tracking-widest text-gold hover:text-cocoa disabled:cursor-not-allowed disabled:opacity-40"
             >
-              {form.images.length >= 3 ? "3 image limit reached" : "+ Add image slot"}
+              {form.images.length >= 5 ? "5 image limit reached" : "+ Add image slot"}
             </button>
           </div>
           <label className="block">
