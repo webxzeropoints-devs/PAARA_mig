@@ -48,6 +48,30 @@ values:
 `GET /api/health` is the health check endpoint. The future Slate origin must be
 included in `FRONTEND_URL`; credentials and PayU callbacks must use HTTPS.
 
+## Loyalty reward claim emails
+
+Six completed stamps make a customer eligible, but do not send the selected-gift
+claim email. In Admin → Coupons & Loyalty, choose the customer's gift and use
+**Confirm & send claim email** to queue it. The confirmation, claim token, and
+email outbox state are committed together. The backend worker sends to the
+registered customer email, retries transient failures up to five attempts, and
+exposes a manual retry action in the admin panel after terminal failure. An
+admin can also issue a fresh link if a delivered claim link expires unclaimed.
+
+Claim links expire 30 days after confirmation. The database stores only a
+SHA-256 token hash for validation and an authenticated encrypted copy while
+delivery is pending; the encrypted copy is cleared after the mail service
+accepts the message. Keep `JWT_SECRET` stable while reward emails are queued.
+The related PostgreSQL migration is
+`prisma/migrations/20260927170000_loyalty_reward_claim_email/migration.sql`.
+Apply it only to an isolated local/test database before exercising the new
+workflow; do not point local migration commands at production.
+
+The customer claim page validates the token on the backend and then requires
+the matching signed-in customer to choose a saved delivery address. Claiming
+creates the existing zero-value loyalty order and marks the reward claim as
+claimed in the same transaction.
+
 AppSail local filesystem storage is not used for uploads. Product, homepage,
 Paara IRL, owner, Worn By You, and other admin image uploads use Stratus when
 `PAARA_STRATUS_BUCKET` is configured, otherwise the Catalyst File Store folder

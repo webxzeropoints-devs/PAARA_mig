@@ -112,7 +112,13 @@ export default function LoyaltyCardPage() {
                 </div>
               </div>
             ) : loyalty.rewardEligible ? (
-              <p className="mt-3 text-cocoa/65">Your reward is unlocked. PAARA is selecting your jewellery gift; check back soon.</p>
+              <p className="mt-3 text-cocoa/65">
+                {loyalty.rewardClaimStatus === "reward_selected"
+                  ? "PAARA has selected your jewellery gift. It will appear here after your reward is confirmed and the claim email is sent."
+                  : loyalty.rewardClaimStatus === "email_pending"
+                    ? "Your jewellery gift is confirmed. The secure claim email will arrive once delivery completes."
+                    : "Your reward is unlocked. PAARA is selecting your jewellery gift; check back soon."}
+              </p>
             ) : (
               <p className="mt-2 text-cocoa/65">Complete six stamps within six months to receive the jewellery gift selected by PAARA. The reward cannot be exchanged for cash.</p>
             )}

@@ -20,6 +20,7 @@ const { maskSensitiveText } = require('./utils/validate');
 const { formatOrderNumber } = require('./utils/orderNumber');
 const mediaStore = require('./utils/mediaStore');
 const { createLoyaltyStampEmailWorker } = require('./services/loyaltyStampEmailNotifications');
+const { createLoyaltyRewardClaimEmailWorker } = require('./services/loyaltyRewardClaimEmails');
 
 const productsRouter = require('./routes/products');
 const vaultRouter = require('./routes/vault');
@@ -37,8 +38,11 @@ const homepageRouter = require('./routes/homepage');
 const loyaltyRouter = require('./routes/loyalty');
 const paaraStoryRouter = require('./routes/paaraStory');
 const loyaltyStampEmailWorker = createLoyaltyStampEmailWorker();
+const loyaltyRewardClaimEmailWorker = createLoyaltyRewardClaimEmailWorker();
 
 const app = express();
+const safeRequestPath = (requestPath) => String(requestPath || '')
+  .replace(/(\/api\/loyalty\/claim\/)[A-Za-z0-9_-]+/g, '$1[redacted]');
 
 const normalizeOrigin = (origin) => {
   if (!origin) return null;
@@ -224,7 +228,7 @@ if (db.isServerless) {
     const reportPersistFailure = (err) => {
       console.error('[DB_PERSIST] Upload failed after local write; serving response anyway.', {
         method: req.method,
-        path: req.path,
+        path: safeRequestPath(req.path),
         error: err.message,
         errorName: err.name,
         errorCode: err.code,
@@ -233,7 +237,7 @@ if (db.isServerless) {
 
     const persistBeforeResponse = () => {
       if (!persistPromise) {
-        console.log('[DB_PERSIST] Request requires persistence.', { method: req.method, path: req.path });
+        console.log('[DB_PERSIST] Request requires persistence.', { method: req.method, path: safeRequestPath(req.path) });
         persistPromise = db.persist();
       }
       return persistPromise;
@@ -338,7 +342,7 @@ app.use((err, req, res, next) => {
     code: err.code,
     meta: err.meta,
     method: req.method,
-    path: req.path,
+    path: safeRequestPath(req.path),
   });
   if (err?.name === 'MulterError') {
     const message = err.code === 'LIMIT_FIELD_VALUE'
@@ -355,7 +359,7 @@ app.use((err, req, res, next) => {
       code: err.code,
       meta: err.meta,
       method: req.method,
-      path: req.path,
+      path: safeRequestPath(req.path),
     });
     return res.status(500).json({
       ok: false,
@@ -390,6 +394,8 @@ if (db.isServerless) {
 
       loyaltyStampEmailWorker.start();
       console.log('[LOYALTY_EMAIL_OUTBOX] Worker started.');
+      loyaltyRewardClaimEmailWorker.start();
+      console.log('[LOYALTY_REWARD_CLAIM_EMAIL_OUTBOX] Worker started.');
     } catch (error) {
       console.error('[DB] Failed to initialize database tables:', error.message);
     }
@@ -410,6 +416,7 @@ if (db.isServerless) {
     shuttingDown = true;
     console.log('Received kill signal, shutting down gracefully.');
     loyaltyStampEmailWorker.stop();
+    loyaltyRewardClaimEmailWorker.stop();
     const forceTimer = setTimeout(() => {
       console.error('Could not close connections in time, forcefully shutting down');
       try { db.close(); } catch { /* already closed */ }

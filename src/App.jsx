@@ -37,6 +37,7 @@ import ReturnPolicy from "./pages/content/ReturnPolicy";
 import Addresses from "./pages/account/Addresses";
 import GiftCards from "./pages/account/GiftCards";
 import LoyaltyCardPage from "./pages/account/LoyaltyCardPage";
+import LoyaltyRewardClaimPage from "./pages/account/LoyaltyRewardClaimPage";
 import Notifications from "./pages/account/Notifications";
 import CustomerCare from "./pages/account/CustomerCare";
 import TrackOrder from "./pages/account/TrackOrder";
@@ -98,6 +99,7 @@ function AnimatedRoutes() {
       <Route path="/account/addresses" element={<Addresses />} />
       <Route path="/account/gift-cards" element={<GiftCards />} />
       <Route path="/account/loyalty" element={<LoyaltyCardPage />} />
+      <Route path="/rewards/claim/:token" element={<LoyaltyRewardClaimPage />} />
       <Route path="/account/notifications" element={<Notifications />} />
       <Route path="/account/customer-care" element={<CustomerCare />} />
       <Route path="/account/track-order" element={<TrackOrder />} />

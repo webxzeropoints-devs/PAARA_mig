@@ -327,6 +327,9 @@ export const getOrderStatus = (orderId, email) => apiGet(`/orders/${orderId}/sta
 export const getLoyaltyStatus = () => apiGet("/loyalty");
 export const getLoyaltyThreshold = () => apiGet("/loyalty/threshold");
 export const getLoyaltyOrder = (orderId) => apiGet(`/loyalty/order/${orderId}`);
+export const getLoyaltyRewardClaim = (token) => apiGet(`/loyalty/claim/${encodeURIComponent(token)}`);
+export const claimLoyaltyRewardByToken = (token, address_id) =>
+  apiPost(`/loyalty/claim/${encodeURIComponent(token)}`, { address_id });
 export const getPaaraStory = () => apiGet("/paara-story");
 export const processLoyaltyOrder = (orderId) => apiPost("/loyalty/process-order", { order_id: orderId });
 export const redeemLoyaltyReward = (address_id) => apiPost("/loyalty/redeem-reward", { address_id });

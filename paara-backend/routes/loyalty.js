@@ -7,6 +7,7 @@ const {
   redeemLoyaltyReward,
   syncRecentPaidLoyaltyOrders,
 } = require('../services/loyalty');
+const { getRewardClaim } = require('../services/loyaltyRewardClaims');
 const db = require('../db/database.pg');
 
 const router = express.Router();
@@ -18,6 +19,27 @@ router.get('/threshold', async (req, res) => {
   } catch (error) {
     console.error('[LOYALTY_THRESHOLD_FAILED]', error.message);
     return res.status(500).json({ error: 'Could not load the loyalty threshold.' });
+  }
+});
+
+router.get('/claim/:token', async (req, res) => {
+  try {
+    res.set({
+      'Cache-Control': 'no-store, no-cache, must-revalidate, max-age=0',
+      Pragma: 'no-cache',
+      'X-Robots-Tag': 'noindex, nofollow',
+    });
+    const claim = await getRewardClaim(req.params.token);
+    if (!claim) {
+      return res.status(404).json({ error: 'This reward claim link is invalid or has expired.' });
+    }
+    return res.json(claim);
+  } catch (error) {
+    console.error('[LOYALTY_REWARD_CLAIM_LOOKUP_FAILED]', {
+      message: error.message,
+      name: error.name,
+    });
+    return res.status(500).json({ error: 'Could not load this reward claim.' });
   }
 });
 
@@ -128,6 +150,26 @@ router.post('/redeem-reward', requireAuth, async (req, res) => {
       name: error.name,
     });
     return res.status(500).json({ error: 'Could not redeem this loyalty reward.' });
+  }
+});
+
+router.post('/claim/:token', requireAuth, async (req, res) => {
+  try {
+    const result = await redeemLoyaltyReward(
+      req.customer.id,
+      req.body?.address_id,
+      req.params.token
+    );
+    return res.status(200).json({ success: true, ...result });
+  } catch (error) {
+    if (error.statusCode) {
+      return res.status(error.statusCode).json({ error: error.message });
+    }
+    console.error('[LOYALTY_REWARD_TOKEN_CLAIM_FAILED]', {
+      message: error.message,
+      name: error.name,
+    });
+    return res.status(500).json({ error: 'Could not claim this PAARA reward.' });
   }
 });
 

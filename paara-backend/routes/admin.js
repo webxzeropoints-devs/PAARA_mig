@@ -7,6 +7,11 @@ const {
   QUALIFYING_PAYMENT_STATUSES,
   syncRecentPaidLoyaltyOrders,
 } = require('../services/loyalty');
+const {
+  confirmLoyaltyReward,
+  retryLoyaltyRewardEmail,
+  selectLoyaltyReward,
+} = require('../services/loyaltyRewardClaims');
 const publicImageUrl = require('../utils/publicImageUrl');
 const publicHomepageImageUrl = require('../utils/publicHomepageImageUrl');
 const mediaStore = require('../utils/mediaStore');
@@ -2479,51 +2484,58 @@ router.put('/loyalty-eligible/:customerId/reward', async (q, s) => {
   }
 
   try {
-    const schema = await db.query(`
-      SELECT EXISTS (
-        SELECT 1 FROM information_schema.columns
-        WHERE table_schema = current_schema()
-          AND table_name = 'loyalty_cards'
-          AND column_name = 'reward_product_id'
-      ) AS ready
-    `);
-    if (!schema.rows[0]?.ready) {
-      return s.status(503).json({
-        error: 'Customer gift assignment is unavailable until the loyalty database update is applied.',
-      });
-    }
-
-    if (productId !== null) {
-      const product = await db.query(
-        'SELECT 1 FROM products WHERE id = $1 AND is_active = TRUE',
-        [productId]
-      );
-      if (product.rowCount === 0) {
-        return s.status(400).json({ error: 'Choose an active jewellery gift.' });
-      }
-    }
-
-    const updated = await db.query(`
-      UPDATE loyalty_cards
-      SET reward_product_id = $2,
-          updated_at = to_char(CURRENT_TIMESTAMP, 'YYYY-MM-DD HH24:MI:SS')
-      WHERE customer_id = $1
-        AND completed_at IS NOT NULL
-        AND reward_redeemed_at IS NULL
-      RETURNING customer_id, reward_product_id
-    `, [customerId, productId]);
-
-    if (updated.rowCount === 0) {
-      return s.status(409).json({ error: 'This customer is not currently eligible for a gift.' });
-    }
-    return s.json(updated.rows[0]);
+    const result = await selectLoyaltyReward(customerId, productId);
+    return s.json(result);
   } catch (error) {
+    if (error.statusCode) {
+      return s.status(error.statusCode).json({ error: error.message });
+    }
     console.error('[ADMIN_LOYALTY_REWARD_ASSIGN_FAILED]', {
       customerId,
       message: error.message,
       name: error.name,
     });
     return s.status(500).json({ error: 'Could not assign this customer’s jewellery gift.' });
+  }
+});
+
+router.post('/loyalty-eligible/:customerId/confirm-reward', async (q, s) => {
+  const customerId = Number(q.params.customerId);
+  if (!Number.isSafeInteger(customerId) || customerId < 1) {
+    return s.status(400).json({ error: 'A valid customer is required.' });
+  }
+  try {
+    return s.json(await confirmLoyaltyReward(customerId));
+  } catch (error) {
+    if (error.statusCode) {
+      return s.status(error.statusCode).json({ error: error.message });
+    }
+    console.error('[ADMIN_LOYALTY_REWARD_CONFIRM_FAILED]', {
+      customerId,
+      message: error.message,
+      name: error.name,
+    });
+    return s.status(500).json({ error: 'Could not confirm this customer’s reward.' });
+  }
+});
+
+router.post('/loyalty-eligible/:customerId/retry-email', async (q, s) => {
+  const customerId = Number(q.params.customerId);
+  if (!Number.isSafeInteger(customerId) || customerId < 1) {
+    return s.status(400).json({ error: 'A valid customer is required.' });
+  }
+  try {
+    return s.json(await retryLoyaltyRewardEmail(customerId));
+  } catch (error) {
+    if (error.statusCode) {
+      return s.status(error.statusCode).json({ error: error.message });
+    }
+    console.error('[ADMIN_LOYALTY_REWARD_EMAIL_RETRY_FAILED]', {
+      customerId,
+      message: error.message,
+      name: error.name,
+    });
+    return s.status(500).json({ error: 'Could not retry this reward email.' });
   }
 });
 
@@ -2559,12 +2571,21 @@ router.get('/loyalty-eligible', async (q, s) => {
              latest.order_status AS claim_order_status,
              latest.product_name AS claimed_product_name,
              latest.redeemed_at AS claimed_at,
+             claim.status AS reward_claim_status,
+             claim.email_status AS reward_email_status,
+             claim.email_attempts AS reward_email_attempts,
+             claim.last_error AS reward_email_error,
+             claim.email_sent_at AS reward_email_sent_at,
+             claim.token_expires_at AS reward_claim_expires_at,
              (
                lc.completed_at IS NOT NULL AND
                lc.reward_redeemed_at IS NULL
              ) AS reward_eligible
       FROM customers c
       LEFT JOIN loyalty_cards lc ON lc.customer_id = c.id
+      LEFT JOIN loyalty_reward_claims claim
+        ON claim.customer_id = c.id
+       AND claim.eligibility_completed_at = lc.completed_at
       LEFT JOIN LATERAL (
         SELECT NULLIF(to_jsonb(r)->>'order_id', '')::integer AS order_id,
                r.redeemed_at, p.name AS product_name,

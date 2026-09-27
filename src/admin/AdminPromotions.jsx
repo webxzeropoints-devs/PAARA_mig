@@ -51,6 +51,7 @@ export default function AdminPromotions() {
   const [loadingEligible, setLoadingEligible] = useState(false);
   const [rewardPickerCustomer, setRewardPickerCustomer] = useState(null);
   const [savingRewardCustomer, setSavingRewardCustomer] = useState(null);
+  const [rewardActionCustomer, setRewardActionCustomer] = useState(null);
   const [loyaltySaving, setLoyaltySaving] = useState(false);
   const [loyaltyError, setLoyaltyError] = useState("");
 
@@ -152,6 +153,38 @@ export default function AdminPromotions() {
       setLoyaltyError(err.message || "Could not save this customer's gift.");
     } finally {
       setSavingRewardCustomer(null);
+    }
+  };
+
+  const confirmCustomerReward = async (customerId) => {
+    setRewardActionCustomer(customerId);
+    setLoyaltyError("");
+    try {
+      await adminRequest(`/admin/loyalty-eligible/${customerId}/confirm-reward`, {
+        method: "POST",
+        body: {},
+      });
+      await loadLoyaltyRules();
+    } catch (err) {
+      setLoyaltyError(err.message || "Could not confirm this customer's reward.");
+    } finally {
+      setRewardActionCustomer(null);
+    }
+  };
+
+  const retryCustomerRewardEmail = async (customerId) => {
+    setRewardActionCustomer(customerId);
+    setLoyaltyError("");
+    try {
+      await adminRequest(`/admin/loyalty-eligible/${customerId}/retry-email`, {
+        method: "POST",
+        body: {},
+      });
+      await loadLoyaltyRules();
+    } catch (err) {
+      setLoyaltyError(err.message || "Could not retry this reward email.");
+    } finally {
+      setRewardActionCustomer(null);
     }
   };
 
@@ -312,6 +345,17 @@ export default function AdminPromotions() {
                 <tbody>
                   {eligibleCustomers.map((customer) => {
                     const isEligible = Boolean(customer.reward_eligible);
+                    const rewardStatus = customer.reward_claim_status
+                      || (customer.reward_product_id ? "reward_selected" : "eligible");
+                    const emailPending = rewardStatus === "email_pending";
+                    const emailSent = rewardStatus === "email_sent";
+                    const claimLinkExpired = emailSent
+                      && Number.isFinite(new Date(customer.reward_claim_expires_at).getTime())
+                      && new Date(customer.reward_claim_expires_at).getTime() <= Date.now();
+                    const canRetryEmail = (emailPending && customer.reward_email_status === "failed")
+                      || claimLinkExpired;
+                    const claimed = rewardStatus === "claimed" || Boolean(customer.claim_order_id);
+                    const rewardLocked = emailPending || emailSent || claimed;
                     return (
                       <tr key={customer.customer_id} className="border-b border-cocoa/10 odd:bg-sand/35">
                         <td className="px-4 py-3"><p className="font-medium text-cocoa">{customer.name}</p><p className="text-xs text-cocoa/55">{customer.email}</p></td>
@@ -323,12 +367,53 @@ export default function AdminPromotions() {
                               onChange={() => setRewardPickerCustomer({ customerId: customer.customer_id, selectedId: customer.reward_product_id ? String(customer.reward_product_id) : "" })}
                               onClear={() => setCustomerReward(customer.customer_id, null)}
                               saving={savingRewardCustomer === customer.customer_id}
+                              locked={rewardLocked}
                             />
                           ) : (
                             <span className={`text-[10px] uppercase tracking-widest ${customer.claimed_at || customer.claim_order_id || customer.completed_at ? "text-cocoa/55" : "text-cocoa/40"}`}>{customer.claimed_at || customer.claim_order_id || customer.completed_at ? "Claimed" : "Collecting stamps"}</span>
                           )}
                         </td>
-                        <td className="px-4 py-3">{customer.claim_order_number ? <><span className="block font-medium text-cocoa">{customer.claimed_product_name || "Jewellery gift"}</span><span className="text-xs text-cocoa/60">{customer.claim_order_number} · {customer.claim_order_status || "Order Confirmed"}</span></> : isEligible ? <span className="text-xs text-cocoa/55">Waiting for customer claim</span> : customer.claimed_at ? <span className="text-xs text-cocoa/40">Claimed order record unavailable</span> : <span className="text-xs text-cocoa/40">—</span>}</td>
+                        <td className="px-4 py-3">
+                          {customer.claim_order_number ? (
+                            <>
+                              <span className="block font-medium text-cocoa">{customer.claimed_product_name || "Jewellery gift"}</span>
+                              <span className="text-xs text-cocoa/60">{customer.claim_order_number} · {customer.claim_order_status || "Order Confirmed"}</span>
+                            </>
+                          ) : claimed ? (
+                            <span className="text-xs text-cocoa/55">Claimed</span>
+                          ) : isEligible ? (
+                            <div className="space-y-2">
+                              <span className="block text-xs text-cocoa/65">
+                                {emailSent
+                                  ? claimLinkExpired
+                                    ? "Claim link expired · a fresh email can be sent"
+                                    : `Email sent${customer.reward_claim_expires_at ? ` · claim by ${new Date(customer.reward_claim_expires_at).toLocaleDateString("en-IN")}` : ""}`
+                                  : emailPending
+                                    ? (customer.reward_email_status === "failed"
+                                      ? `Email failed${customer.reward_email_error ? `: ${customer.reward_email_error}` : ""}`
+                                      : "Reward selected · email queued")
+                                    : rewardStatus === "reward_selected"
+                                      ? "Waiting for owner confirmation"
+                                      : "Awaiting reward selection"}
+                              </span>
+                              {rewardStatus === "reward_selected" && customer.reward_product_id && (
+                                <button type="button" onClick={() => confirmCustomerReward(customer.customer_id)} disabled={rewardActionCustomer === customer.customer_id} className="bg-gold px-3 py-2 text-[10px] uppercase tracking-widest text-white hover:bg-cocoa disabled:opacity-50">
+                                  {rewardActionCustomer === customer.customer_id ? "Confirming…" : "Confirm & send claim email"}
+                                </button>
+                              )}
+                              {canRetryEmail && (
+                                <button type="button" onClick={() => retryCustomerRewardEmail(customer.customer_id)} disabled={rewardActionCustomer === customer.customer_id} className="border border-gold px-3 py-2 text-[10px] uppercase tracking-widest text-cocoa hover:bg-gold/10 disabled:opacity-50">
+                                  {rewardActionCustomer === customer.customer_id ? "Sending…" : claimLinkExpired ? "Renew claim link" : "Retry email"}
+                                </button>
+                              )}
+                              {customer.reward_email_sent_at && <span className="block text-[10px] text-cocoa/50">Sent {new Date(customer.reward_email_sent_at).toLocaleString("en-IN")}</span>}
+                            </div>
+                          ) : customer.claimed_at ? (
+                            <span className="text-xs text-cocoa/40">Claimed order record unavailable</span>
+                          ) : (
+                            <span className="text-xs text-cocoa/40">Collecting stamps</span>
+                          )}
+                        </td>
                       </tr>
                     );
                   })}
@@ -366,7 +451,7 @@ export default function AdminPromotions() {
   );
 }
 
-function RewardProductCard({ product, onChange, onClear, saving }) {
+function RewardProductCard({ product, onChange, onClear, saving, locked }) {
   return (
     <div className="flex items-center gap-3 border border-gold/40 bg-sand p-2">
       <div className="grid h-12 w-12 shrink-0 place-items-center bg-shell">
@@ -376,8 +461,8 @@ function RewardProductCard({ product, onChange, onClear, saving }) {
         <p className="max-w-[15rem] truncate font-product-name text-sm text-cocoa">{product?.name || "No gift selected"}</p>
         <p className="text-[10px] text-cocoa/55">{product ? `Stock: ${product.stock}` : "Choose a gift for this customer"}</p>
       </div>
-      <button type="button" onClick={onChange} disabled={saving} className="text-[10px] uppercase tracking-widest text-gold hover:text-cocoa disabled:opacity-50">{product ? "Change" : "Choose gift"}</button>
-      {product && <button type="button" onClick={onClear} disabled={saving} className="p-1 text-cocoa/50 hover:text-cocoa disabled:opacity-50" aria-label="Clear reward product"><X size={15} /></button>}
+      {!locked && <button type="button" onClick={onChange} disabled={saving} className="text-[10px] uppercase tracking-widest text-gold hover:text-cocoa disabled:opacity-50">{product ? "Change" : "Choose gift"}</button>}
+      {product && !locked && <button type="button" onClick={onClear} disabled={saving} className="p-1 text-cocoa/50 hover:text-cocoa disabled:opacity-50" aria-label="Clear reward product"><X size={15} /></button>}
       {saving && <span className="text-[10px] text-cocoa/55">Saving…</span>}
     </div>
   );

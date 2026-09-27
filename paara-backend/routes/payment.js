@@ -65,12 +65,23 @@ async function markOrderPaid(orderId, paymentReference) {
   }
 }
 
-async function hasLoyaltyStamp(orderId) {
-  const result = await db.query(
-    'SELECT EXISTS (SELECT 1 FROM loyalty_stamps WHERE order_id = $1) AS awarded',
-    [orderId]
-  );
-  return Boolean(result.rows[0]?.awarded);
+async function processVerifiedOrderLoyalty(order) {
+  try {
+    return {
+      loyalty: await processLoyaltyOrder(order.id, order.customer_id),
+      loyaltyProcessingPending: false,
+    };
+  } catch (error) {
+    console.error('[LOYALTY_PROCESSING_FAILED]', {
+      orderId: order.id,
+      message: maskSensitiveText(error.message),
+      name: error.name,
+    });
+    return {
+      loyalty: null,
+      loyaltyProcessingPending: true,
+    };
+  }
 }
 
 async function sendPaidInvoice(orderId, loyaltyResult) {
@@ -90,7 +101,7 @@ async function sendPaidInvoice(orderId, loyaltyResult) {
         ? 'Order not found.'
         : 'Customer email address is missing.',
     });
-    return;
+    return { success: false, skipped: true };
   }
 
   const { rows: items } = await db.query(
@@ -190,7 +201,7 @@ async function sendPaidInvoice(orderId, loyaltyResult) {
     .map((item) => `${item.product_name} | Qty ${item.quantity} | Unit ${formatMoney(item.unit_price)} | ${formatMoney(item.line_total)}`)
     .join('\n');
 
-  await trySendEmail(
+  const delivery = await trySendEmail(
     {
       to: order.email,
       subject: `Order confirmed — ${order.order_number || `Order ${order.id}`}`,
@@ -267,6 +278,10 @@ https://paarajewellery.in`,
     },
     `order confirmation email for ${order.order_number || order.id}`
   );
+  if (!delivery.success) {
+    throw delivery.error || new Error('Order confirmation email could not be delivered.');
+  }
+  return delivery;
 }
 
 async function processPayuCallback(payload, expectedStatus) {
@@ -331,11 +346,16 @@ async function processPayuCallback(payload, expectedStatus) {
   if (
     String(order.payment_status || '').trim().toLowerCase() === 'paid'
   ) {
+    const { loyalty, loyaltyProcessingPending } =
+      await processVerifiedOrderLoyalty(order);
     return {
       orderId: order.id,
       paid: true,
       newlyPaid: false,
-      loyaltyStampAwarded: await hasLoyaltyStamp(order.id),
+      loyalty,
+      loyaltyProcessingPending,
+      loyaltyEligible: Boolean(loyalty?.order?.eligible),
+      loyaltyStampAwarded: Boolean(loyalty?.order?.awarded),
     };
   }
   
@@ -361,27 +381,21 @@ async function processPayuCallback(payload, expectedStatus) {
   const reference = String(details.mihpayid || payload.mihpayid || txnid);
   const newlyPaid = await markOrderPaid(order.id, reference);
 
+  const { loyalty, loyaltyProcessingPending } =
+    await processVerifiedOrderLoyalty(order);
+
   if (newlyPaid) {
-    let loyalty = null;
-
-    try {
-      loyalty = await processLoyaltyOrder(
-        order.id,
-        order.customer_id
-      );
-    } catch (error) {
-      console.error('[LOYALTY_PROCESSING_FAILED]', {
-        orderId: order.id,
-        message: maskSensitiveText(error.message),
-        name: error.name,
-      });
-    }
-
     void sendPaidInvoice(order.id, loyalty)
-      .then(() => {
-        console.log('[ORDER_CONFIRMATION_EMAIL_SENT]', {
-          orderId: order.id,
-        });
+      .then((delivery) => {
+        if (delivery?.skipped) return;
+        if (!delivery?.success) {
+          console.error('[INVOICE_EMAIL_FAILED]', {
+            orderId: order.id,
+            reason: 'Email service did not confirm delivery.',
+          });
+          return;
+        }
+        console.log('[ORDER_CONFIRMATION_EMAIL_SENT]', { orderId: order.id });
       })
       .catch((error) => {
         console.error('[INVOICE_EMAIL_FAILED]', {
@@ -396,6 +410,8 @@ async function processPayuCallback(payload, expectedStatus) {
       paid: true,
       newlyPaid: true,
       loyalty,
+      loyaltyProcessingPending,
+      loyaltyEligible: Boolean(loyalty?.order?.eligible),
       loyaltyStampAwarded: Boolean(loyalty?.order?.awarded),
     };
   }
@@ -404,7 +420,10 @@ async function processPayuCallback(payload, expectedStatus) {
     orderId: order.id,
     paid: true,
     newlyPaid: false,
-    loyaltyStampAwarded: await hasLoyaltyStamp(order.id),
+    loyalty,
+    loyaltyProcessingPending,
+    loyaltyEligible: Boolean(loyalty?.order?.eligible),
+    loyaltyStampAwarded: Boolean(loyalty?.order?.awarded),
   };
 } // closes processPayuCallback
 
@@ -518,6 +537,9 @@ const payuCallback = (expectedStatus) => async (req, res) => {
 
     if (result.loyaltyStampAwarded) {
       redirectUrl.searchParams.set('loyalty_stamp', 'earned');
+    }
+    if (result.loyaltyProcessingPending) {
+      redirectUrl.searchParams.set('loyalty_stamp', 'pending');
     }
 
     return res.redirect(

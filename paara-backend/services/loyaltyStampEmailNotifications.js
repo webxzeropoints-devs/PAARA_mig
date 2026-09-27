@@ -18,7 +18,7 @@ function buildLoyaltyStampEmail({ name, stampCount }) {
   if (count === 1) {
     update = 'Congratulations! You earned your first PAARA loyalty stamp.';
   } else if (count === 6) {
-    update = 'Congratulations! Your PAARA loyalty card is complete. Your reward is unlocked!';
+    update = 'Congratulations! Your PAARA loyalty card is complete. PAARA will select and confirm your jewellery reward, then email you a secure claim link.';
   } else {
     update = `Your PAARA loyalty card now has ${count} out of 6 stamps. Keep shopping to unlock your reward!`;
   }

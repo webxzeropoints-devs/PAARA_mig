@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { Link, useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { motion } from "framer-motion";
-import { downloadInvoice, getLoyaltyOrder, getOrderById } from "../../lib/api";
+import { downloadInvoice, getOrderById, processLoyaltyOrder } from "../../lib/api";
 import { fadeUp } from "../../lib/motion";
 import { useCart } from "../../lib/cart.jsx";
 
@@ -19,12 +19,15 @@ export default function OrderConfirmation() {
   const [order, setOrder] = useState(location.state?.recentOrder || null);
   const [error, setError] = useState("");
   const [downloadState, setDownloadState] = useState("idle");
-  const [loyaltyStampAwarded, setLoyaltyStampAwarded] = useState(
-    params.get("loyalty_stamp") === "earned"
-  );
+  const [loyaltyStampAwarded, setLoyaltyStampAwarded] = useState(false);
+  const [loyaltyProcessingPending, setLoyaltyProcessingPending] = useState(false);
+  const [loyaltyProgress, setLoyaltyProgress] = useState(null);
+  const [loyaltyError, setLoyaltyError] = useState("");
   const [copiedOrderId, setCopiedOrderId] = useState(false);
   const [pollingStopped, setPollingStopped] = useState(false);
   const loyaltyCheckedOrderRef = React.useRef(null);
+  const paymentStatus = String(order?.payment_status || "").trim().toLowerCase();
+  const paymentVerified = paymentSuccess && CONFIRMED_PAYMENT_STATUSES.has(paymentStatus);
 
   useEffect(() => {
     if (location.state?.clearCart || paymentSuccess) {
@@ -107,31 +110,58 @@ export default function OrderConfirmation() {
   }, [location.state, orderId, paymentSuccess]);
 
   useEffect(() => {
-    const paymentStatus = String(order?.payment_status || "").trim().toLowerCase();
     if (
       !paymentSuccess ||
       !orderId ||
-      loyaltyStampAwarded ||
-      !CONFIRMED_PAYMENT_STATUSES.has(paymentStatus) ||
+      !paymentVerified ||
       loyaltyCheckedOrderRef.current === orderId
     ) return;
     loyaltyCheckedOrderRef.current = orderId;
     let cancelled = false;
-    getLoyaltyOrder(orderId)
-      .then((result) => {
-        if (!cancelled) setLoyaltyStampAwarded(result?.awarded === true);
-      })
-      .catch((err) => {
-        if (!cancelled) setLoyaltyStampAwarded(false);
-        console.error("[LOYALTY_AWARD_LOOKUP_FAILED]", { orderId, message: err?.message });
-      });
+    let retryTimer;
+    setLoyaltyProcessingPending(true);
+    setLoyaltyError("");
+    const processStamp = async () => {
+      let lastError;
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        try {
+          const result = await processLoyaltyOrder(orderId);
+          if (cancelled) return;
+          const awarded = result?.order?.awarded === true;
+          setLoyaltyStampAwarded(awarded);
+          setLoyaltyProgress(result?.state || null);
+          setLoyaltyProcessingPending(false);
+          return;
+        } catch (err) {
+          lastError = err;
+          if (attempt < 2 && !cancelled) {
+            await new Promise((resolve) => {
+              retryTimer = window.setTimeout(resolve, 500 * (attempt + 1));
+            });
+          }
+        }
+      }
+      if (!cancelled) {
+        setLoyaltyProcessingPending(false);
+        setLoyaltyError(
+          lastError?.message || "We could not load your loyalty stamp status."
+        );
+        console.error("[LOYALTY_PROCESSING_RETRY_EXHAUSTED]", {
+          orderId,
+          attempts: 3,
+          message: lastError?.message,
+        });
+      }
+    };
+    processStamp();
     return () => {
       cancelled = true;
+      if (retryTimer) window.clearTimeout(retryTimer);
       if (loyaltyCheckedOrderRef.current === orderId) {
         loyaltyCheckedOrderRef.current = null;
       }
     };
-  }, [order?.payment_status, orderId, paymentSuccess]);
+  }, [order?.payment_status, orderId, paymentSuccess, paymentVerified]);
 
   if (!orderId) {
     return (
@@ -167,9 +197,11 @@ export default function OrderConfirmation() {
           </p>
           <h1 className="font-display text-3xl md:text-4xl mb-2">
             {paymentSuccess
-              ? loyaltyStampAwarded
-                ? "Hurray! You've earned 1 loyalty stamp!"
-                : "Your order has been placed successfully!"
+              ? paymentVerified
+                ? loyaltyStampAwarded
+                  ? "Hurray! You've earned 1 loyalty stamp!"
+                  : "Your order has been placed successfully!"
+                : "Confirming your payment…"
               : "Payment was not completed"}
           </h1>
           <p className="text-sm text-cocoa/60 mb-8">
@@ -182,11 +214,18 @@ export default function OrderConfirmation() {
             </span>
           </p>
 
-          {paymentSuccess && <div className="mb-6 rounded-sm border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">Your order is saved successfully. You can download the invoice below.</div>}
-          {paymentSuccess && loyaltyStampAwarded && (
+          {paymentSuccess && paymentVerified && <div className="mb-6 rounded-sm border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">Your order is saved successfully. You can download the invoice below.</div>}
+          {paymentSuccess && paymentVerified && loyaltyStampAwarded && (
             <section className="mb-8 border border-gold/35 bg-white/65 px-5 py-6 sm:px-7">
+              <h2 className="font-display text-xl text-cocoa">
+                Congratulations! You've earned a PAARA loyalty stamp!
+              </h2>
               <p className="mt-2 text-sm leading-relaxed text-cocoa/70">
-                Your loyalty journey continues. Check your card to see your progress.
+                {loyaltyProgress
+                  ? loyaltyProgress.rewardEligible
+                    ? "Your six-stamp reward is unlocked."
+                    : `Your card has ${loyaltyProgress.stampCount} of ${loyaltyProgress.cardSize} stamps. Earn ${Math.max(0, loyaltyProgress.cardSize - loyaltyProgress.stampCount)} more to unlock your reward.`
+                  : "Your loyalty journey continues. Check your card to see your progress."}
               </p>
               <Link
                 to="/account/loyalty"
@@ -195,6 +234,22 @@ export default function OrderConfirmation() {
                 Check Your Loyalty Card
               </Link>
             </section>
+          )}
+          {paymentSuccess && !paymentVerified && (
+            <p className="mb-6 border border-gold/30 bg-white/65 px-4 py-3 text-sm text-cocoa/70" role="status">
+              We’re confirming your payment with the payment provider…
+            </p>
+          )}
+          {paymentSuccess && paymentVerified && loyaltyProcessingPending && !loyaltyStampAwarded && (
+            <p className="mb-6 border border-gold/30 bg-white/65 px-4 py-3 text-sm text-cocoa/70" role="status">
+              Payment is confirmed. We’re checking your loyalty stamp now…
+            </p>
+          )}
+          {paymentSuccess && paymentVerified && loyaltyError && !loyaltyStampAwarded && (
+            <p className="mb-6 border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900" role="status">
+              Your payment is confirmed, but we couldn’t refresh loyalty progress just now. Your order is safe; please try your loyalty card shortly.
+              <Link to="/account/loyalty" className="ml-1 underline">View loyalty card</Link>
+            </p>
           )}
 
           {error && (

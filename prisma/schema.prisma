@@ -61,6 +61,7 @@ model Product {
   giftCardRule     GiftCardRule?
   loyaltyRewardCards LoyaltyCard[]
   loyaltyRewardRedemptions LoyaltyRewardRedemption[]
+  loyaltyRewardClaims LoyaltyRewardClaim[]
   wishlists        Wishlist[]
   vaultProduct     VaultProduct?
   tileProducts     TileProduct[]
@@ -105,6 +106,7 @@ model Customer {
   loyaltyCard          LoyaltyCard?
   loyaltyStamps        LoyaltyStamp[]
   loyaltyRewardRedemptions LoyaltyRewardRedemption[]
+  loyaltyRewardClaims LoyaltyRewardClaim[]
   wishlists            Wishlist[]
 
   @@map("customers")
@@ -207,6 +209,7 @@ model Order {
   items                   OrderItem[]
   loyaltyStamp            LoyaltyStamp?
   loyaltyRewardRedemption LoyaltyRewardRedemption?
+  loyaltyRewardClaim       LoyaltyRewardClaim?
 
   @@index([customerId], map: "idx_orders_customer")
   @@map("orders")
@@ -257,7 +260,6 @@ model LoyaltyCard {
 
   customer          Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
   rewardProduct     Product? @relation(fields: [rewardProductId], references: [id], onDelete: SetNull)
-
   @@map("loyalty_cards")
 }
 
@@ -308,6 +310,36 @@ model LoyaltyRewardRedemption {
 
   @@index([customerId, redeemedAt], map: "idx_loyalty_rewards_customer")
   @@map("loyalty_reward_redemptions")
+}
+
+model LoyaltyRewardClaim {
+  id                   Int       @id @default(autoincrement())
+  customerId           Int       @map("customer_id")
+  eligibilityCompletedAt String   @map("eligibility_completed_at")
+  rewardProductId      Int?      @map("reward_product_id")
+  status               String    @default("eligible")
+  tokenHash            String?   @unique @map("token_hash")
+  tokenStatus          String    @default("not_generated") @map("token_status")
+  tokenExpiresAt       DateTime? @map("token_expires_at") @db.Timestamptz(6)
+  encryptedToken       String?   @map("encrypted_token")
+  emailStatus          String    @default("not_sent") @map("email_status")
+  emailAttempts        Int       @default(0) @map("email_attempts")
+  nextAttemptAt        DateTime  @default(now()) @map("next_attempt_at") @db.Timestamptz(6)
+  emailClaimedAt       DateTime? @map("email_claimed_at") @db.Timestamptz(6)
+  emailSentAt          DateTime? @map("email_sent_at") @db.Timestamptz(6)
+  lastError            String?   @map("last_error")
+  claimedAt            DateTime? @map("claimed_at") @db.Timestamptz(6)
+  claimedOrderId       Int?      @unique @map("claimed_order_id")
+  createdAt            DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt            DateTime  @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  customer             Customer  @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  rewardProduct        Product?  @relation(fields: [rewardProductId], references: [id], onDelete: Restrict)
+  claimedOrder         Order?    @relation(fields: [claimedOrderId], references: [id], onDelete: SetNull)
+
+  @@unique([customerId, eligibilityCompletedAt], map: "loyalty_reward_claims_customer_eligibility_key")
+  @@index([status, emailStatus, nextAttemptAt], map: "idx_loyalty_reward_claims_email_due")
+  @@map("loyalty_reward_claims")
 }
 
 model LoyaltySettings {

@@ -1,6 +1,7 @@
 const db = require('../db/database.pg');
 const publicImageUrl = require('../utils/publicImageUrl');
 const { formatOrderNumber } = require('../utils/orderNumber');
+const { hashClaimToken } = require('./loyaltyRewardClaimEmails');
 
 const DEFAULT_THRESHOLD = 19;
 const CARD_SIZE = 6;
@@ -41,6 +42,7 @@ const serializeCard = (card, threshold = DEFAULT_THRESHOLD) => ({
   completedAt: card?.completed_at || null,
   rewardEligible: Boolean(card?.completed_at && !card?.reward_redeemed_at),
   rewardProduct: card?.reward_product || null,
+  rewardClaimStatus: card?.reward_claim_status || null,
   threshold,
   cardSize: CARD_SIZE,
   history: card?.history || [],
@@ -74,10 +76,32 @@ async function getLoyaltyRewardProduct(customerId, client = db) {
       AND lc.completed_at IS NOT NULL
       AND lc.reward_redeemed_at IS NULL
       AND p.is_active = TRUE
+      AND EXISTS (
+        SELECT 1
+        FROM loyalty_reward_claims claim
+        WHERE claim.customer_id = lc.customer_id
+          AND claim.eligibility_completed_at = lc.completed_at
+          AND claim.status = 'email_sent'
+          AND claim.email_status = 'sent'
+          AND claim.token_status = 'active'
+          AND claim.token_expires_at > CURRENT_TIMESTAMP
+      )
   `, [customerId]);
   const product = result.rows[0];
   return product
     ? { ...product, image_url: publicImageUrl(product.image_url) }
+    : null;
+}
+
+async function getLoyaltyRewardClaimStatus(customerId, completedAt, client = db) {
+  if (!completedAt) return null;
+  const result = await client.query(`
+    SELECT status, email_status
+    FROM loyalty_reward_claims
+    WHERE customer_id = $1 AND eligibility_completed_at = $2
+  `, [customerId, completedAt]);
+  return result.rows[0]
+    ? { status: result.rows[0].status, emailStatus: result.rows[0].email_status }
     : null;
 }
 
@@ -163,6 +187,11 @@ async function getLoyaltyState(customerId, client = db) {
     reward_product: await getLoyaltyRewardProduct(customerId, client),
     history: historyResult.rows,
     reward_history: rewardHistoryResult.rows,
+    reward_claim_status: (await getLoyaltyRewardClaimStatus(
+      customerId,
+      card?.completed_at,
+      client
+    ))?.status || null,
   }, await getLoyaltyThreshold(client));
 }
 
@@ -373,7 +402,7 @@ async function syncRecentPaidLoyaltyOrders(customerId) {
   }
 }
 
-async function redeemLoyaltyReward(customerId, addressId) {
+async function redeemLoyaltyReward(customerId, addressId, claimToken = null) {
   const client = await db.pool.connect();
 
   try {
@@ -398,6 +427,27 @@ async function redeemLoyaltyReward(customerId, addressId) {
 
     if (!card || !card.completed_at || card.reward_redeemed_at) {
       throw Object.assign(new Error('A completed loyalty reward is required.'), { statusCode: 409 });
+    }
+
+    const tokenHash = claimToken ? hashClaimToken(claimToken) : null;
+    const claimResult = await client.query(`
+      SELECT id
+      FROM loyalty_reward_claims
+      WHERE customer_id = $1
+        AND eligibility_completed_at = $2
+        AND status = 'email_sent'
+        AND email_status = 'sent'
+        AND token_status = 'active'
+        AND token_expires_at > CURRENT_TIMESTAMP
+        AND ($3::text IS NULL OR token_hash = $3)
+      FOR UPDATE
+    `, [customerId, card.completed_at, tokenHash]);
+    const rewardClaim = claimResult.rows[0];
+    if (!rewardClaim) {
+      throw Object.assign(
+        new Error('Your reward must be confirmed and its claim email delivered before it can be claimed.'),
+        { statusCode: 409 }
+      );
     }
 
     const rewardProductId = Number(card.reward_product_id);
@@ -490,6 +540,16 @@ async function redeemLoyaltyReward(customerId, addressId) {
       VALUES ($1, $2, $3, $4)
     `, [customerId, redeemedAt, product.id, orderId]);
     await client.query(`
+      UPDATE loyalty_reward_claims
+      SET status = 'claimed',
+          token_status = 'claimed',
+          claimed_at = $2,
+          claimed_order_id = $3,
+          encrypted_token = NULL,
+          updated_at = CURRENT_TIMESTAMP
+      WHERE id = $1
+    `, [rewardClaim.id, redeemedAt, orderId]);
+    await client.query(`
       UPDATE loyalty_cards
       SET stamp_count = 0,
           first_stamp_at = NULL,
@@ -564,8 +624,9 @@ async function processLoyaltyOrder(orderId, customerId) {
         order: {
           orderId,
           awarded: true,
+          eligible: true,
           animationShown: Boolean(existing.animation_shown_at),
-          newlyAwarded: !existing.animation_shown_at,
+          newlyAwarded: false,
         },
       };
     }
@@ -583,6 +644,7 @@ async function processLoyaltyOrder(orderId, customerId) {
         order: {
           orderId,
           awarded: false,
+          eligible: false,
           animationShown: false,
           newlyAwarded: false,
         },
@@ -617,8 +679,9 @@ async function processLoyaltyOrder(orderId, customerId) {
         order: {
           orderId,
           awarded: true,
+          eligible: true,
           animationShown: Boolean(lockedExisting.animation_shown_at),
-          newlyAwarded: !lockedExisting.animation_shown_at,
+          newlyAwarded: false,
         },
       };
     }
@@ -655,6 +718,7 @@ async function processLoyaltyOrder(orderId, customerId) {
         order: {
           orderId,
           awarded: false,
+          eligible: false,
           animationShown: false,
           newlyAwarded: false,
         },
@@ -695,6 +759,17 @@ async function processLoyaltyOrder(orderId, customerId) {
       ON CONFLICT (stamp_id) DO NOTHING
     `, [stampId, Math.min(nextCount, CARD_SIZE)]);
 
+    if (completedAt) {
+      await client.query(`
+        INSERT INTO loyalty_reward_claims (
+          customer_id, eligibility_completed_at, status,
+          token_status, email_status, next_attempt_at
+        )
+        VALUES ($1, $2, 'eligible', 'not_generated', 'not_sent', CURRENT_TIMESTAMP)
+        ON CONFLICT (customer_id, eligibility_completed_at) DO NOTHING
+      `, [customerId, completedAt]);
+    }
+
     const state = await getLoyaltyState(customerId, client);
 
     await client.query('COMMIT');
@@ -704,6 +779,7 @@ async function processLoyaltyOrder(orderId, customerId) {
       order: {
         orderId,
         awarded: true,
+        eligible: true,
         animationShown: false,
         newlyAwarded: true,
       },
