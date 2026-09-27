@@ -927,9 +927,9 @@ router.post('/products', async (q, s) => {
     }
 
     const filesArray = asFiles(q.files);
-    if (filesArray.length > 3) {
+    if (filesArray.length > 5) {
       return s.status(400).json({
-        error: 'No more than 3 image files can be uploaded at once.',
+        error: 'No more than 5 image files can be uploaded at once.',
         code: 'TOO_MANY_IMAGE_FILES',
       });
     }
@@ -1079,9 +1079,9 @@ router.put('/products/:id', async (q, s) => {
       'existingImages'
     );
     const filesArray = asFiles(q.files);
-    if (filesArray.length > 3) {
+    if (filesArray.length > 5) {
       throw imageError(
-        'No more than 3 image files can be uploaded at once.',
+        'No more than 5 image files can be uploaded at once.',
         'TOO_MANY_IMAGE_FILES'
       );
     }
@@ -1371,6 +1371,7 @@ router.put('/products/:id', async (q, s) => {
 router.delete('/products/:id', async (q, s) => {
   let client;
   let images = [];
+  let softDeleted = false;
   try {
     client = await db.pool.connect();
     await client.query('BEGIN');
@@ -1391,30 +1392,44 @@ router.delete('/products/:id', async (q, s) => {
     );
 
     if (orderReference.rowCount > 0) {
-      await client.query('ROLLBACK');
-      return s.status(409).json({
-        error: 'This product is referenced by an order and cannot be deleted.',
-      });
+      // This product has order history, so hard-deleting it would break
+      // those orders' records. Deactivate it instead so it disappears
+      // from the storefront and admin "active" views without touching
+      // historical orders.
+      const deactivated = await client.query(
+        'UPDATE products SET is_active = FALSE WHERE id = $1 RETURNING id',
+        [q.params.id]
+      );
+
+      if (deactivated.rowCount === 0) {
+        await client.query('ROLLBACK');
+        return s.status(404).json({
+          error: 'Product not found.',
+        });
+      }
+
+      softDeleted = true;
+      await client.query('COMMIT');
+    } else {
+      const imageResult = await client.query(
+        'SELECT image_url FROM product_images WHERE product_id = $1',
+        [q.params.id]
+      );
+      images = imageResult.rows.map((row) => row.image_url);
+      const result = await client.query(
+        'DELETE FROM products WHERE id = $1 RETURNING id',
+        [q.params.id]
+      );
+
+      if (result.rowCount === 0) {
+        await client.query('ROLLBACK');
+        return s.status(404).json({
+          error: 'Product not found.',
+        });
+      }
+
+      await client.query('COMMIT');
     }
-
-    const imageResult = await client.query(
-      'SELECT image_url FROM product_images WHERE product_id = $1',
-      [q.params.id]
-    );
-    images = imageResult.rows.map((row) => row.image_url);
-    const result = await client.query(
-      'DELETE FROM products WHERE id = $1 RETURNING id',
-      [q.params.id]
-    );
-
-    if (result.rowCount === 0) {
-      await client.query('ROLLBACK');
-      return s.status(404).json({
-        error: 'Product not found.',
-      });
-    }
-
-    await client.query('COMMIT');
   } catch (error) {
     if (client) {
       try {
@@ -1432,6 +1447,14 @@ router.delete('/products/:id', async (q, s) => {
     });
   } finally {
     if (client) client.release();
+  }
+
+  if (softDeleted) {
+    return s.json({
+      success: true,
+      deactivated: true,
+      message: 'This product has past orders, so it was deactivated instead of deleted.',
+    });
   }
 
   await cleanupReferences(images, q);
@@ -2781,7 +2804,7 @@ router.post('/orders/:id/verify-manual-payment', async (q, s) => {
 
       await trySendEmail({
         to: order.email,
-        subject: `Order confirmed � ${order.order_number || `Order ${order.id}`}`,
+        subject: `Order confirmed   ${order.order_number || `Order ${order.id}`}`,
         text: `Hi ${order.name || 'Customer'},
 
 Your payment has been verified and your Paara Jewellery order is confirmed.
