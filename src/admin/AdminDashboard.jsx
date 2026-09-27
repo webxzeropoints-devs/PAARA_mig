@@ -1246,7 +1246,7 @@ function ProductEditor({ product, categories, onClose, onSaved }) {
           <div>
             <div className="mb-1.5 flex items-center justify-between">
               <span className="block text-xs uppercase tracking-widest text-cocoa/60">Product images</span>
-              <span className="text-[10px] uppercase tracking-widest text-gold">{form.images.filter(Boolean).length}/3</span>
+              <span className="text-[10px] uppercase tracking-widest text-gold">{form.images.filter(Boolean).length}/5</span>
             </div>
             <div className="space-y-3">
               {form.images.map((image, index) => (
@@ -1283,10 +1283,10 @@ function ProductEditor({ product, categories, onClose, onSaved }) {
             <button
               type="button"
               onClick={() => update("images", [...form.images, { file: null, url: null }])}
-              disabled={form.images.length >= 3}
+              disabled={form.images.length >= 5}
               className="mt-3 text-xs uppercase tracking-widest text-gold hover:text-cocoa disabled:cursor-not-allowed disabled:opacity-40"
             >
-              {form.images.length >= 3 ? "3 image limit reached" : "+ Add image slot"}
+              {form.images.length >= 5 ? "5 image limit reached" : "+ Add image slot"}
             </button>
           </div>
           <label className="block">
