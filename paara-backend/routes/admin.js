@@ -1395,8 +1395,9 @@ router.delete('/products/:id', async (q, s) => {
       'SELECT 1 FROM order_items WHERE product_id = $1 LIMIT 1',
       [q.params.id]
     );
+    const forceDelete = String(q.query?.force || '').toLowerCase() === 'true';
 
-    if (orderReference.rowCount > 0) {
+    if (orderReference.rowCount > 0 && !forceDelete) {
       // This product has order history, so hard-deleting it would break
       // those orders' records. Deactivate it instead so it disappears
       // from the storefront and admin "active" views without touching
@@ -1416,6 +1417,16 @@ router.delete('/products/:id', async (q, s) => {
       softDeleted = true;
       await client.query('COMMIT');
     } else {
+      if (orderReference.rowCount > 0) {
+        // Force delete: remove the order_items rows referencing this
+        // product first, since the products table can't be deleted while
+        // they exist. This permanently breaks the item listing on those
+        // historical orders — only do this for known test/junk orders.
+        await client.query(
+          'DELETE FROM order_items WHERE product_id = $1',
+          [q.params.id]
+        );
+      }
       const imageResult = await client.query(
         'SELECT image_url FROM product_images WHERE product_id = $1',
         [q.params.id]

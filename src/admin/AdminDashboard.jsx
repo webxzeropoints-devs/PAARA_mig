@@ -141,7 +141,16 @@ export default function AdminDashboard() {
   const onDelete = async (product) => {
     if (!window.confirm(`Delete "${product.name}"? This is a hard delete.`)) return;
     try {
-      await adminDeleteProduct(product.id);
+      const result = await adminDeleteProduct(product.id);
+      if (result?.deactivated) {
+        const forceConfirm = window.confirm(
+          `"${product.name}" has past orders, so it was deactivated instead of deleted.\n\n` +
+          `Do you want to PERMANENTLY delete it anyway? This will remove it from any past orders too.`
+        );
+        if (forceConfirm) {
+          await adminDeleteProduct(product.id, true);
+        }
+      }
       reload();
     } catch (err) {
       setError(err.message);
