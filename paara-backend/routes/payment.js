@@ -65,6 +65,14 @@ async function markOrderPaid(orderId, paymentReference) {
   }
 }
 
+async function hasLoyaltyStamp(orderId) {
+  const result = await db.query(
+    'SELECT EXISTS (SELECT 1 FROM loyalty_stamps WHERE order_id = $1) AS awarded',
+    [orderId]
+  );
+  return Boolean(result.rows[0]?.awarded);
+}
+
 async function sendPaidInvoice(orderId, loyaltyResult) {
   const { rows: orderRows } = await db.query(`
     SELECT o.*, c.email, c.name, c.phone
@@ -165,15 +173,15 @@ async function sendPaidInvoice(orderId, loyaltyResult) {
     </tr>`).join('');
   const htmlAddress = addressText.split(', ').map(escapeHtml).join('<br>');
   const loyaltyText = loyaltyReceipt
-    ? `\n\nLOYALTY\n-------\nStamps earned for this order: ${loyaltyReceipt.stampsEarned}\nCurrent card progress: ${loyaltyReceipt.stampCount} of ${loyaltyReceipt.cardSize}\nTotal stamps earned: ${loyaltyReceipt.totalStamps}\nStamps remaining to unlock the gift: ${loyaltyReceipt.remainingStamps}\nQualifying order threshold: INR ${Number(loyaltyReceipt.threshold).toLocaleString('en-IN')}\n${loyaltyReceipt.rewardProductName ? `Current reward: ${loyaltyReceipt.rewardProductName}\n` : ''}Reward status: ${loyaltyReceipt.rewardStatus}\n`
+    ? `\n\nLOYALTY\n-------\n${loyaltyReceipt.stampMessage}\n${loyaltyReceipt.progressMessage}\nCurrent card progress: ${loyaltyReceipt.stampCount} of ${loyaltyReceipt.cardSize}\nTotal stamps earned: ${loyaltyReceipt.totalStamps}\nQualifying order threshold: INR ${Number(loyaltyReceipt.threshold).toLocaleString('en-IN')}\n${loyaltyReceipt.rewardProductName ? `Current reward: ${loyaltyReceipt.rewardProductName}\n` : ''}Reward status: ${loyaltyReceipt.rewardStatus}\n`
     : '';
   const htmlLoyalty = loyaltyReceipt ? `
     <section style="margin-top:24px;padding:18px;background:#fbf7f0;border:1px solid #eadfce;border-radius:8px">
       <h2 style="margin:0 0 12px;font-size:17px;color:#3d2b24">Your loyalty progress</h2>
-      <p style="margin:5px 0;color:#30251f"><strong>${loyaltyReceipt.stampsEarned}</strong> stamp earned for this order</p>
+      <p style="margin:5px 0;color:#30251f"><strong>${escapeHtml(loyaltyReceipt.stampMessage)}</strong></p>
+      <p style="margin:5px 0;color:#30251f">${escapeHtml(loyaltyReceipt.progressMessage)}</p>
       <p style="margin:5px 0;color:#30251f">Current card: <strong>${loyaltyReceipt.stampCount} of ${loyaltyReceipt.cardSize}</strong> stamps</p>
       <p style="margin:5px 0;color:#30251f">Total stamps earned: ${loyaltyReceipt.totalStamps}</p>
-      <p style="margin:5px 0;color:#30251f">Stamps remaining to unlock your gift: ${loyaltyReceipt.remainingStamps}</p>
       <p style="margin:5px 0;color:#30251f">Qualifying order threshold: ${formatMoney(loyaltyReceipt.threshold)}</p>
       ${loyaltyReceipt.rewardProductName ? `<p style="margin:5px 0;color:#30251f">Current reward: ${escapeHtml(loyaltyReceipt.rewardProductName)}</p>` : ''}
       <p style="margin:5px 0;color:#8b6b43"><strong>${escapeHtml(loyaltyReceipt.rewardStatus)}</strong></p>
@@ -327,6 +335,7 @@ async function processPayuCallback(payload, expectedStatus) {
       orderId: order.id,
       paid: true,
       newlyPaid: false,
+      loyaltyStampAwarded: await hasLoyaltyStamp(order.id),
     };
   }
   
@@ -368,25 +377,26 @@ async function processPayuCallback(payload, expectedStatus) {
       });
     }
 
-    try {
-      await sendPaidInvoice(order.id, loyalty);
-
-      console.log('[ORDER_CONFIRMATION_EMAIL_SENT]', {
-        orderId: order.id,
+    void sendPaidInvoice(order.id, loyalty)
+      .then(() => {
+        console.log('[ORDER_CONFIRMATION_EMAIL_SENT]', {
+          orderId: order.id,
+        });
+      })
+      .catch((error) => {
+        console.error('[INVOICE_EMAIL_FAILED]', {
+          orderId: order.id,
+          message: maskSensitiveText(error.message),
+          name: error.name,
+        });
       });
-    } catch (error) {
-      console.error('[INVOICE_EMAIL_FAILED]', {
-        orderId: order.id,
-        message: maskSensitiveText(error.message),
-        name: error.name,
-      });
-    }
 
     return {
       orderId: order.id,
       paid: true,
       newlyPaid: true,
       loyalty,
+      loyaltyStampAwarded: Boolean(loyalty?.order?.awarded),
     };
   }
 
@@ -394,6 +404,7 @@ async function processPayuCallback(payload, expectedStatus) {
     orderId: order.id,
     paid: true,
     newlyPaid: false,
+    loyaltyStampAwarded: await hasLoyaltyStamp(order.id),
   };
 } // closes processPayuCallback
 
@@ -504,6 +515,10 @@ const payuCallback = (expectedStatus) => async (req, res) => {
       'payment',
       result.paid ? 'success' : 'failure'
     );
+
+    if (result.loyaltyStampAwarded) {
+      redirectUrl.searchParams.set('loyalty_stamp', 'earned');
+    }
 
     return res.redirect(
       303,

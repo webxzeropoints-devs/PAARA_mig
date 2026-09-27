@@ -19,6 +19,8 @@ test('builds receipt progress from an awarded loyalty result', () => {
     totalStamps: 18,
     cardSize: 6,
     remainingStamps: 0,
+    stampMessage: 'You earned 1 loyalty stamp from this order.',
+    progressMessage: 'Your loyalty reward is unlocked.',
     threshold: 750,
     rewardEligible: true,
     rewardProductName: 'Silver Pendant',
@@ -46,6 +48,34 @@ test('does not imply a gift is claimable while product selection is pending', ()
   });
   assert.equal(summary.rewardEligible, true);
   assert.equal(summary.rewardStatus, 'Eligible; gift selection pending');
+});
+
+test('clearly reports remaining stamps needed to unlock the reward', () => {
+  const summary = buildLoyaltyReceipt({
+    order: { awarded: true },
+    state: {
+      stampCount: 4,
+      totalStamps: 10,
+      rewardEligible: false,
+      threshold: 750,
+    },
+  });
+  assert.equal(summary.stampMessage, 'You earned 1 loyalty stamp from this order.');
+  assert.equal(summary.remainingStamps, 2);
+  assert.equal(summary.progressMessage, 'Earn 2 more stamps to unlock your reward.');
+});
+
+test('uses singular wording when one stamp remains', () => {
+  const summary = buildLoyaltyReceipt({
+    order: { awarded: true },
+    state: {
+      stampCount: 5,
+      totalStamps: 11,
+      rewardEligible: false,
+      threshold: 750,
+    },
+  });
+  assert.equal(summary.progressMessage, 'Earn 1 more stamp to unlock your reward.');
 });
 
 test('reads existing order stamp and progress without modifying loyalty records', async () => {

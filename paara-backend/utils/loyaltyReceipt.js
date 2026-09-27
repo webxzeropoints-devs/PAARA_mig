@@ -10,13 +10,18 @@ function buildLoyaltyReceipt(awardResult) {
   );
   const rewardEligible = Boolean(awardResult.state.rewardEligible);
   const rewardProductName = String(awardResult.state.rewardProduct?.name || '').trim() || null;
+  const remainingStamps = Math.max(0, CARD_SIZE - stampCount);
 
   return {
     stampsEarned: 1,
     stampCount,
     totalStamps: Math.max(0, Number(awardResult.state.totalStamps) || 0),
     cardSize: CARD_SIZE,
-    remainingStamps: Math.max(0, CARD_SIZE - stampCount),
+    remainingStamps,
+    stampMessage: 'You earned 1 loyalty stamp from this order.',
+    progressMessage: remainingStamps > 0
+      ? `Earn ${remainingStamps} more stamp${remainingStamps === 1 ? '' : 's'} to unlock your reward.`
+      : 'Your loyalty reward is unlocked.',
     threshold: Number(awardResult.state.threshold) > 0
       ? Number(awardResult.state.threshold)
       : DEFAULT_THRESHOLD,

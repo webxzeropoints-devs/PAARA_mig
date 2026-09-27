@@ -19,7 +19,9 @@ export default function OrderConfirmation() {
   const [order, setOrder] = useState(location.state?.recentOrder || null);
   const [error, setError] = useState("");
   const [downloadState, setDownloadState] = useState("idle");
-  const [loyaltyStampAwarded, setLoyaltyStampAwarded] = useState(false);
+  const [loyaltyStampAwarded, setLoyaltyStampAwarded] = useState(
+    params.get("loyalty_stamp") === "earned"
+  );
   const [copiedOrderId, setCopiedOrderId] = useState(false);
   const [pollingStopped, setPollingStopped] = useState(false);
   const loyaltyCheckedOrderRef = React.useRef(null);
@@ -109,6 +111,7 @@ export default function OrderConfirmation() {
     if (
       !paymentSuccess ||
       !orderId ||
+      loyaltyStampAwarded ||
       !CONFIRMED_PAYMENT_STATUSES.has(paymentStatus) ||
       loyaltyCheckedOrderRef.current === orderId
     ) return;

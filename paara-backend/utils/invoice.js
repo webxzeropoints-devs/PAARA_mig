@@ -101,29 +101,33 @@ function createInvoicePdf(order, items, address, loyaltyReceipt = null) {
     doc.y = totalTop + 42;
     if (loyaltyReceipt) {
       const loyaltyTop = doc.y;
-      doc.rect(left, loyaltyTop, width, 102).fillAndStroke('#fbf7f0', '#eadfce');
+      const loyaltyWidth = width - 24;
+      const stampMessage = pdfText(
+        `${loyaltyReceipt.stampMessage} ${loyaltyReceipt.progressMessage}`
+      );
+      const cardDetails = pdfText(
+        `Current card: ${loyaltyReceipt.stampCount} of ${loyaltyReceipt.cardSize} | Total stamps earned: ${loyaltyReceipt.totalStamps}`
+      );
+      const thresholdDetails = pdfText(
+        `Qualifying order threshold: ${money(loyaltyReceipt.threshold)} | Reward status: ${loyaltyReceipt.rewardStatus}${loyaltyReceipt.rewardProductName ? ` (${loyaltyReceipt.rewardProductName})` : ''}`
+      );
+      doc.font('Helvetica').fontSize(9);
+      const stampMessageHeight = doc.heightOfString(stampMessage, { width: loyaltyWidth });
+      const cardDetailsHeight = doc.heightOfString(cardDetails, { width: loyaltyWidth });
+      const thresholdDetailsHeight = doc.heightOfString(thresholdDetails, { width: loyaltyWidth });
+      const stampMessageTop = loyaltyTop + 28;
+      const detailsTop = stampMessageTop + stampMessageHeight + 4;
+      const thresholdTop = detailsTop + cardDetailsHeight + 4;
+      const loyaltyBottom = thresholdTop + thresholdDetailsHeight + 8;
+      doc.rect(left, loyaltyTop, width, loyaltyBottom - loyaltyTop + 8)
+        .fillAndStroke('#fbf7f0', '#eadfce');
       doc.fillColor('#8b6b43').font('Helvetica-Bold').fontSize(10)
         .text('YOUR LOYALTY PROGRESS', left + 12, loyaltyTop + 10);
       doc.fillColor('#3d2b24').font('Helvetica').fontSize(9);
-      doc.text(
-        pdfText(`${loyaltyReceipt.stampsEarned} stamp earned for this order | Current card: ${loyaltyReceipt.stampCount} of ${loyaltyReceipt.cardSize}`),
-        left + 12,
-        loyaltyTop + 28,
-        { width: width - 24 }
-      );
-      doc.text(
-        pdfText(`Total stamps earned: ${loyaltyReceipt.totalStamps} | Stamps remaining to unlock the gift: ${loyaltyReceipt.remainingStamps}`),
-        left + 12,
-        loyaltyTop + 45,
-        { width: width - 24 }
-      );
-      doc.text(
-        pdfText(`Qualifying order threshold: ${money(loyaltyReceipt.threshold)} | Reward status: ${loyaltyReceipt.rewardStatus}${loyaltyReceipt.rewardProductName ? ` (${loyaltyReceipt.rewardProductName})` : ''}`),
-        left + 12,
-        loyaltyTop + 62,
-        { width: width - 24 }
-      );
-      doc.y = loyaltyTop + 114;
+      doc.text(stampMessage, left + 12, stampMessageTop, { width: loyaltyWidth });
+      doc.text(cardDetails, left + 12, detailsTop, { width: loyaltyWidth });
+      doc.text(thresholdDetails, left + 12, thresholdTop, { width: loyaltyWidth });
+      doc.y = loyaltyBottom + 8;
     }
     doc.fillColor('#8b6b43').font('Helvetica').fontSize(9).text('Thank you for choosing Paara.');
     doc.end();
