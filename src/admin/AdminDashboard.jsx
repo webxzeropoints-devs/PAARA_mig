@@ -448,6 +448,7 @@ export default function AdminDashboard() {
       {(editingCategory || categoryCreating) && (
         <CategoryEditor
           category={editingCategory}
+          categories={categories}
           onClose={() => { setEditingCategory(null); setCategoryCreating(false); }}
           onSaved={() => { setEditingCategory(null); setCategoryCreating(false); reload(); }}
         />
@@ -628,8 +629,26 @@ function ShippingEditor({ city, onClose, onSaved }) {
   );
 }
 
-function CategoryEditor({ category, onClose, onSaved }) {
+function CategoryEditor({ category, categories, onClose, onSaved }) {
   const isEdit = Boolean(category);
+  const genderOptions = [
+    ...GENDERS,
+    ...(category?.gender && !GENDERS.includes(category.gender) ? [category.gender] : []),
+  ];
+  const vibeOptions = [
+    ...VIBES,
+    ...(category?.vibe && !VIBES.includes(category.vibe) ? [category.vibe] : []),
+  ];
+  const materialOptions = [
+    ...new Set(
+      categories
+        .map((item) => String(item.material || "").trim())
+        .filter(Boolean)
+    ),
+  ];
+  if (category?.material && !materialOptions.includes(category.material)) {
+    materialOptions.push(category.material);
+  }
   const [form, setForm] = useState(() => ({
     name: category?.name || "",
     slug: category?.slug || "",
@@ -703,13 +722,42 @@ function CategoryEditor({ category, onClose, onSaved }) {
               onChange={(e) => update("gender", e.target.value)}
               className="w-full bg-transparent border-b border-cocoa/30 px-0 py-2 text-sm focus:outline-none focus:border-gold"
             >
-              <option value="women">Women</option>
-              <option value="men">Men</option>
+              {genderOptions.map((gender) => (
+                <option key={gender} value={gender} className="bg-shell">
+                  {formatFilterLabel(gender)}
+                </option>
+              ))}
             </select>
           </label>
           <Row>
-            <Input label="Vibe" value={form.vibe} onChange={(value) => update("vibe", value)} />
-            <Input label="Material" value={form.material} onChange={(value) => update("material", value)} />
+            <label className="block">
+              <span className="block text-xs uppercase tracking-widest text-cocoa/60 mb-1.5">Vibe</span>
+              <select
+                value={form.vibe}
+                onChange={(e) => update("vibe", e.target.value)}
+                className="w-full bg-transparent border-b border-cocoa/30 px-0 py-2 text-sm focus:outline-none focus:border-gold"
+              >
+                <option value="" className="bg-shell">Select vibe</option>
+                {vibeOptions.map((vibe) => (
+                  <option key={vibe} value={vibe} className="bg-shell">
+                    {formatFilterLabel(vibe)}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="block">
+              <span className="block text-xs uppercase tracking-widest text-cocoa/60 mb-1.5">Material</span>
+              <select
+                value={form.material}
+                onChange={(e) => update("material", e.target.value)}
+                className="w-full bg-transparent border-b border-cocoa/30 px-0 py-2 text-sm focus:outline-none focus:border-gold"
+              >
+                <option value="" className="bg-shell">Select material</option>
+                {materialOptions.map((material) => (
+                  <option key={material} value={material} className="bg-shell">{material}</option>
+                ))}
+              </select>
+            </label>
           </Row>
           {error && <p className="text-sm text-cocoa">{error}</p>}
           <div className="flex justify-end gap-3 pt-2">
