@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { Check, Truck } from "lucide-react";
 
 import AccountPageLayout from "./AccountPageLayout";
@@ -7,7 +8,8 @@ import { getOrderStatus } from "../../lib/api";
 const STAGES = ["Order Confirmed", "Packed", "Shipped", "Delivered"];
 
 export default function TrackOrder() {
-  const [orderNumber, setOrderNumber] = useState("");
+  const [searchParams] = useSearchParams();
+  const [orderNumber, setOrderNumber] = useState(() => searchParams.get("order") || "");
   const [email, setEmail] = useState("");
   const [result, setResult] = useState(null);
   const [error, setError] = useState("");

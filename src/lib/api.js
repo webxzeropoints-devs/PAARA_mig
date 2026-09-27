@@ -329,7 +329,8 @@ export const getLoyaltyThreshold = () => apiGet("/loyalty/threshold");
 export const getLoyaltyOrder = (orderId) => apiGet(`/loyalty/order/${orderId}`);
 export const getPaaraStory = () => apiGet("/paara-story");
 export const processLoyaltyOrder = (orderId) => apiPost("/loyalty/process-order", { order_id: orderId });
-export const redeemLoyaltyReward = () => apiPost("/loyalty/redeem-reward", {});
+export const redeemLoyaltyReward = (address_id) => apiPost("/loyalty/redeem-reward", { address_id });
+export const claimLoyaltyReward = redeemLoyaltyReward;
 export const markLoyaltyAnimationShown = (orderId) => apiPost("/loyalty/mark-animation-shown", { order_id: orderId });
 export const updateOrderStatus = (orderId, status) => adminRequest(`/admin/orders/${orderId}/status`, { method: "PATCH", body: { status } });
 

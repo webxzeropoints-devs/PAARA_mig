@@ -112,7 +112,10 @@ router.post('/process-order', requireAuth, async (req, res) => {
 
 router.post('/redeem-reward', requireAuth, async (req, res) => {
   try {
-    const result = await redeemLoyaltyReward(req.customer.id);
+    const result = await redeemLoyaltyReward(
+      req.customer.id,
+      req.body?.address_id
+    );
     return res.status(200).json({ success: true, ...result });
   } catch (error) {
     if (error.statusCode) {

@@ -2394,10 +2394,35 @@ router.delete('/gift-card-rules/:id', async (q, s) => {
 
 router.get('/loyalty-settings', async (q, s) => {
   try {
-    const result = await db.query(
-      'SELECT reward_threshold FROM loyalty_settings WHERE id = 1'
-    );
-    return s.json({ reward_threshold: Number(result.rows[0]?.reward_threshold || 19) });
+    const result = await db.query(`
+      SELECT ls.reward_threshold, ls.reward_product_id,
+             p.name AS reward_product_name, p.stock AS reward_product_stock,
+             (
+               SELECT pi.image_url
+               FROM product_images pi
+               WHERE pi.product_id = p.id
+               ORDER BY pi.sort_order ASC, pi.id ASC
+               LIMIT 1
+             ) AS reward_product_image
+      FROM loyalty_settings ls
+      LEFT JOIN products p ON p.id = ls.reward_product_id
+      WHERE ls.id = 1
+    `);
+    const settings = result.rows[0];
+    return s.json({
+      reward_threshold: Number(settings?.reward_threshold || 19),
+      reward_product_id: settings?.reward_product_id || null,
+      reward_product: settings?.reward_product_id
+        ? {
+            id: settings.reward_product_id,
+            name: settings.reward_product_name,
+            stock: settings.reward_product_stock,
+            image_url: publicImageUrl(settings.reward_product_image),
+          }
+        : null,
+      stamps_required: 6,
+      validity_months: 6,
+    });
   } catch (error) {
     console.error('[ADMIN_LOYALTY_SETTINGS_GET_FAILED]', error.message);
     return s.status(500).json({ error: 'Could not load loyalty settings.' });
@@ -2406,24 +2431,89 @@ router.get('/loyalty-settings', async (q, s) => {
 
 router.put('/loyalty-settings', async (q, s) => {
   const threshold = Number(q.body?.reward_threshold);
+  const rawRewardProductId = q.body?.reward_product_id;
+  const rewardProductId = rawRewardProductId == null || rawRewardProductId === ''
+    ? null
+    : Number(rawRewardProductId);
 
   if (!Number.isFinite(threshold) || threshold <= 0) {
     return s.status(400).json({ error: 'Enter a valid loyalty threshold.' });
   }
+  if (
+    rewardProductId !== null &&
+    (!Number.isSafeInteger(rewardProductId) || rewardProductId < 1)
+  ) {
+    return s.status(400).json({ error: 'Choose a valid reward product.' });
+  }
 
   try {
+    if (rewardProductId !== null) {
+      const product = await db.query(
+        'SELECT 1 FROM products WHERE id = $1 AND is_active = TRUE',
+        [rewardProductId]
+      );
+      if (product.rowCount === 0) {
+        return s.status(400).json({ error: 'Choose an active reward product.' });
+      }
+    }
+
     const result = await db.query(`
-      INSERT INTO loyalty_settings (id, reward_threshold, updated_at)
-      VALUES (1, $1, to_char(CURRENT_TIMESTAMP, 'YYYY-MM-DD HH24:MI:SS'))
+      INSERT INTO loyalty_settings (id, reward_threshold, reward_product_id, updated_at)
+      VALUES (1, $1, $2, to_char(CURRENT_TIMESTAMP, 'YYYY-MM-DD HH24:MI:SS'))
       ON CONFLICT (id) DO UPDATE
       SET reward_threshold = EXCLUDED.reward_threshold,
+          reward_product_id = EXCLUDED.reward_product_id,
           updated_at = EXCLUDED.updated_at
-      RETURNING reward_threshold
-    `, [threshold]);
-    return s.json({ reward_threshold: Number(result.rows[0].reward_threshold) });
+      RETURNING reward_threshold, reward_product_id
+    `, [threshold, rewardProductId]);
+    return s.json({
+      reward_threshold: Number(result.rows[0].reward_threshold),
+      reward_product_id: result.rows[0].reward_product_id,
+    });
   } catch (error) {
     console.error('[ADMIN_LOYALTY_SETTINGS_UPDATE_FAILED]', error.message);
     return s.status(400).json({ error: 'Could not save loyalty settings.' });
+  }
+});
+
+router.get('/loyalty-eligible', async (q, s) => {
+  try {
+    const result = await db.query(`
+      SELECT c.id AS customer_id, c.name, c.email, c.phone,
+             COALESCE(lc.stamp_count, 0)::int AS stamp_count,
+             lc.completed_at,
+             lc.reward_redeemed_at,
+             latest.order_id AS claim_order_id,
+             latest.order_number AS claim_order_number,
+             latest.order_status AS claim_order_status,
+             latest.product_name AS claimed_product_name,
+             latest.redeemed_at AS claimed_at,
+             (
+               lc.completed_at IS NOT NULL AND
+               lc.reward_redeemed_at IS NULL
+             ) AS reward_eligible
+      FROM customers c
+      LEFT JOIN loyalty_cards lc ON lc.customer_id = c.id
+      LEFT JOIN LATERAL (
+        SELECT r.order_id, r.redeemed_at, p.name AS product_name,
+               o.order_number, o.status AS order_status
+        FROM loyalty_reward_redemptions r
+        LEFT JOIN products p ON p.id = r.product_id
+        LEFT JOIN orders o ON o.id = r.order_id
+        WHERE r.customer_id = c.id
+        ORDER BY r.redeemed_at DESC, r.id DESC
+        LIMIT 1
+      ) latest ON TRUE
+      WHERE lc.customer_id IS NOT NULL
+         OR latest.order_id IS NOT NULL
+      ORDER BY reward_eligible DESC, latest.redeemed_at DESC NULLS LAST,
+               c.name ASC
+    `);
+
+    return s.json(result.rows);
+  } catch (error) {
+    console.error('[ADMIN_LOYALTY_ELIGIBLE_FAILED]', error.message);
+    return s.status(500).json({ error: 'Could not load loyalty eligibility.' });
   }
 });
 router.get('/orders', async (q, s) => {

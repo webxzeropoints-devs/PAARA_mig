@@ -1,4 +1,6 @@
 const db = require('../db/database.pg');
+const publicImageUrl = require('../utils/publicImageUrl');
+const { formatOrderNumber } = require('../utils/orderNumber');
 
 const DEFAULT_THRESHOLD = 19;
 const CARD_SIZE = 6;
@@ -18,6 +20,7 @@ const serializeCard = (card, threshold = DEFAULT_THRESHOLD) => ({
   expiresAt: card?.expires_at || null,
   completedAt: card?.completed_at || null,
   rewardEligible: Boolean(card?.completed_at && !card?.reward_redeemed_at),
+  rewardProduct: card?.reward_product || null,
   threshold,
   cardSize: CARD_SIZE,
   history: card?.history || [],
@@ -32,6 +35,26 @@ async function getLoyaltyThreshold(client = db) {
   return Number.isFinite(threshold) && threshold > 0
     ? threshold
     : DEFAULT_THRESHOLD;
+}
+
+async function getLoyaltyRewardProduct(client = db) {
+  const result = await client.query(`
+    SELECT p.id, p.name, p.price, p.stock, p.is_active,
+           (
+             SELECT pi.image_url
+             FROM product_images pi
+             WHERE pi.product_id = p.id
+             ORDER BY pi.sort_order ASC, pi.id ASC
+             LIMIT 1
+           ) AS image_url
+    FROM loyalty_settings ls
+    JOIN products p ON p.id = ls.reward_product_id
+    WHERE ls.id = 1
+  `);
+  const product = result.rows[0];
+  return product
+    ? { ...product, image_url: publicImageUrl(product.image_url) }
+    : null;
 }
 
 async function ensureLoyaltyCard(client, customerId) {
@@ -74,24 +97,33 @@ async function getLoyaltyState(customerId, client = db) {
   `, [customerId]);
 
   const rewardHistoryResult = await client.query(`
-    SELECT id, redeemed_at
-    FROM loyalty_reward_redemptions
-    WHERE customer_id = $1
-    ORDER BY redeemed_at DESC
+    SELECT r.id, r.redeemed_at, r.product_id, r.order_id,
+           o.order_number, o.status AS order_status, p.name AS product_name
+    FROM loyalty_reward_redemptions r
+    LEFT JOIN orders o ON o.id = r.order_id
+    LEFT JOIN products p ON p.id = r.product_id
+    WHERE r.customer_id = $1
+    ORDER BY r.redeemed_at DESC, r.id DESC
   `, [customerId]);
 
   return serializeCard({
     ...card,
+    reward_product: await getLoyaltyRewardProduct(client),
     history: historyResult.rows,
     reward_history: rewardHistoryResult.rows,
   }, await getLoyaltyThreshold(client));
 }
 
-async function redeemLoyaltyReward(customerId) {
+async function redeemLoyaltyReward(customerId, addressId) {
   const client = await db.pool.connect();
 
   try {
     await client.query('BEGIN');
+
+    const normalizedAddressId = Number(addressId);
+    if (!Number.isSafeInteger(normalizedAddressId) || normalizedAddressId < 1) {
+      throw Object.assign(new Error('Choose a saved delivery address.'), { statusCode: 400 });
+    }
 
     const cardResult = await client.query(
       'SELECT * FROM loyalty_cards WHERE customer_id = $1 FOR UPDATE',
@@ -103,11 +135,98 @@ async function redeemLoyaltyReward(customerId) {
       throw Object.assign(new Error('A completed loyalty reward is required.'), { statusCode: 409 });
     }
 
-    const redeemedAt = new Date().toISOString();
-    await client.query(
-      'INSERT INTO loyalty_reward_redemptions (customer_id, redeemed_at) VALUES ($1, $2)',
-      [customerId, redeemedAt]
+    const settingResult = await client.query(
+      'SELECT reward_product_id FROM loyalty_settings WHERE id = 1 FOR SHARE'
     );
+    const rewardProductId = Number(settingResult.rows[0]?.reward_product_id);
+    if (!Number.isSafeInteger(rewardProductId) || rewardProductId < 1) {
+      throw Object.assign(new Error('A reward product has not been selected yet.'), { statusCode: 409 });
+    }
+
+    const productResult = await client.query(`
+      SELECT id, name, stock
+      FROM products
+      WHERE id = $1 AND is_active = TRUE
+      FOR UPDATE
+    `, [rewardProductId]);
+    const product = productResult.rows[0];
+    if (!product) {
+      throw Object.assign(new Error('The selected reward product is unavailable.'), { statusCode: 409 });
+    }
+    if (Number(product.stock) < 1) {
+      throw Object.assign(new Error('The selected reward product is out of stock.'), { statusCode: 409 });
+    }
+
+    const addressResult = await client.query(`
+      SELECT a.*, c.name AS customer_name, c.email AS customer_email, c.phone AS customer_phone
+      FROM addresses a
+      JOIN customers c ON c.id = a.customer_id
+      WHERE a.id = $1 AND a.customer_id = $2
+    `, [normalizedAddressId, customerId]);
+    const delivery = addressResult.rows[0];
+    if (!delivery) {
+      throw Object.assign(new Error('Choose one of your saved delivery addresses.'), { statusCode: 400 });
+    }
+
+    const redeemedAt = new Date().toISOString();
+    const orderResult = await client.query(`
+      INSERT INTO orders (
+        customer_id, address_id, subtotal, gst_amount, shipping_amount,
+        total_amount, status, payment_status, payment_method,
+        payment_verified_at
+      )
+      VALUES ($1, $2, 0, 0, 0, 0, 'Order Confirmed', 'paid', 'loyalty_reward', $3)
+      RETURNING id, created_at
+    `, [customerId, normalizedAddressId, redeemedAt]);
+    const orderId = orderResult.rows[0].id;
+    const orderNumber = formatOrderNumber(orderResult.rows[0].created_at, orderId);
+
+    await client.query(
+      'UPDATE orders SET order_number = $1 WHERE id = $2',
+      [orderNumber, orderId]
+    );
+    await client.query(`
+      INSERT INTO order_items
+        (order_id, product_id, product_name, unit_price, quantity, line_total)
+      VALUES ($1, $2, $3, 0, 1, 0)
+    `, [orderId, product.id, `Loyalty reward: ${product.name}`]);
+    await client.query(`
+      INSERT INTO customer_order_details (
+        order_id, customer_id, full_name, email, phone,
+        shipping_line1, shipping_line2, shipping_city, shipping_state,
+        shipping_pincode, shipping_country, submitted_fields
+      )
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+    `, [
+      orderId,
+      customerId,
+      delivery.customer_name,
+      delivery.customer_email,
+      delivery.customer_phone || null,
+      delivery.line1,
+      delivery.line2,
+      delivery.city,
+      delivery.state,
+      delivery.pincode,
+      'India',
+      JSON.stringify({
+        items: [{ product_id: product.id, quantity: 1, loyalty_reward: true }],
+        address_id: normalizedAddressId,
+        loyalty_reward: true,
+      }),
+    ]);
+    const stockUpdate = await client.query(
+      'UPDATE products SET stock = stock - 1 WHERE id = $1 AND stock > 0',
+      [product.id]
+    );
+    if (stockUpdate.rowCount !== 1) {
+      throw Object.assign(new Error('The selected reward product is out of stock.'), { statusCode: 409 });
+    }
+    await client.query(`
+      INSERT INTO loyalty_reward_redemptions
+        (customer_id, redeemed_at, product_id, order_id)
+      VALUES ($1, $2, $3, $4)
+    `, [customerId, redeemedAt, product.id, orderId]);
     await client.query(`
       UPDATE loyalty_cards
       SET stamp_count = 0,
@@ -121,11 +240,26 @@ async function redeemLoyaltyReward(customerId) {
 
     const state = await getLoyaltyState(customerId, client);
     await client.query('COMMIT');
-    return { state, redeemedAt };
+    return {
+      state,
+      redeemedAt,
+      order: {
+        id: orderId,
+        order_number: orderNumber,
+        status: 'Order Confirmed',
+        payment_method: 'loyalty_reward',
+        total_amount: 0,
+      },
+    };
   } catch (error) {
     try {
       await client.query('ROLLBACK');
-    } catch {}
+    } catch (rollbackError) {
+      console.error('[LOYALTY_REDEEM_ROLLBACK_FAILED]', {
+        message: rollbackError.message,
+        name: rollbackError.name,
+      });
+    }
     throw error;
   } finally {
     client.release();
@@ -334,6 +468,7 @@ async function processLoyaltyOrder(orderId, customerId) {
 module.exports = {
   CARD_SIZE,
   getLoyaltyThreshold,
+  getLoyaltyRewardProduct,
   getLoyaltyState,
   processLoyaltyOrder,
   redeemLoyaltyReward,
