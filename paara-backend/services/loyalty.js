@@ -5,6 +5,11 @@ const { formatOrderNumber } = require('../utils/orderNumber');
 const DEFAULT_THRESHOLD = 19;
 const CARD_SIZE = 6;
 const VALIDITY_MONTHS = 6;
+const QUALIFYING_PAYMENT_STATUSES = new Set([
+  'paid',
+  'verified',
+  'auto-confirmed - unverified',
+]);
 
 const addMonths = (date, months) => {
   const result = new Date(date);
@@ -37,7 +42,7 @@ async function getLoyaltyThreshold(client = db) {
     : DEFAULT_THRESHOLD;
 }
 
-async function getLoyaltyRewardProduct(client = db) {
+async function getLoyaltyRewardProduct(customerId, client = db) {
   const result = await client.query(`
     SELECT p.id, p.name, p.price, p.stock, p.is_active,
            (
@@ -47,10 +52,14 @@ async function getLoyaltyRewardProduct(client = db) {
              ORDER BY pi.sort_order ASC, pi.id ASC
              LIMIT 1
            ) AS image_url
-    FROM loyalty_settings ls
-    JOIN products p ON p.id = ls.reward_product_id
-    WHERE ls.id = 1
-  `);
+    FROM loyalty_cards lc
+    JOIN products p
+      ON p.id = NULLIF(to_jsonb(lc)->>'reward_product_id', '')::integer
+    WHERE lc.customer_id = $1
+      AND lc.completed_at IS NOT NULL
+      AND lc.reward_redeemed_at IS NULL
+      AND p.is_active = TRUE
+  `, [customerId]);
   const product = result.rows[0];
   return product
     ? { ...product, image_url: publicImageUrl(product.image_url) }
@@ -78,8 +87,14 @@ async function getLoyaltyState(customerId, client = db) {
     ) total ON total.customer_id = lc.customer_id
     LEFT JOIN (
       SELECT customer_id, COUNT(*) AS cards_completed
-      FROM loyalty_cards
-      WHERE completed_at IS NOT NULL
+      FROM (
+        SELECT customer_id
+        FROM loyalty_cards
+        WHERE completed_at IS NOT NULL
+        UNION ALL
+        SELECT customer_id
+        FROM loyalty_reward_redemptions
+      ) completed_cards
       GROUP BY customer_id
     ) completed ON completed.customer_id = lc.customer_id
     WHERE lc.customer_id = $1
@@ -97,27 +112,262 @@ async function getLoyaltyState(customerId, client = db) {
   `, [customerId]);
 
   const rewardHistoryResult = await client.query(`
-    SELECT r.id, r.redeemed_at, r.product_id, r.order_id,
+    SELECT r.id, r.redeemed_at,
+           NULLIF(to_jsonb(r)->>'product_id', '')::integer AS product_id,
+           NULLIF(to_jsonb(r)->>'order_id', '')::integer AS order_id,
            o.order_number, o.status AS order_status, p.name AS product_name
     FROM loyalty_reward_redemptions r
-    LEFT JOIN orders o ON o.id = r.order_id
-    LEFT JOIN products p ON p.id = r.product_id
+    LEFT JOIN orders o
+      ON o.id = NULLIF(to_jsonb(r)->>'order_id', '')::integer
+    LEFT JOIN products p
+      ON p.id = NULLIF(to_jsonb(r)->>'product_id', '')::integer
     WHERE r.customer_id = $1
     ORDER BY r.redeemed_at DESC, r.id DESC
   `, [customerId]);
 
   return serializeCard({
     ...card,
-    reward_product: await getLoyaltyRewardProduct(client),
+    reward_product: await getLoyaltyRewardProduct(customerId, client),
     history: historyResult.rows,
     reward_history: rewardHistoryResult.rows,
   }, await getLoyaltyThreshold(client));
+}
+
+async function hasCustomerRewardColumn(client) {
+  const result = await client.query(`
+    SELECT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = current_schema()
+          AND table_name = 'loyalty_cards'
+          AND column_name = 'reward_product_id'
+      ) AS ready
+  `);
+  return Boolean(result.rows[0]?.ready);
+}
+
+async function hasLoyaltyClaimSchema(client) {
+  const cardColumn = await hasCustomerRewardColumn(client);
+  const redemptions = await client.query(`
+    SELECT COUNT(DISTINCT column_name) = 2 AS ready
+    FROM information_schema.columns
+    WHERE table_schema = current_schema()
+      AND table_name = 'loyalty_reward_redemptions'
+      AND column_name IN ('product_id', 'order_id')
+  `);
+  return cardColumn && Boolean(redemptions.rows[0]?.ready);
+}
+
+function isQualifyingLoyaltyOrder(order, threshold) {
+  const paymentStatus = String(order?.payment_status || '').trim().toLowerCase();
+  const paymentMethod = String(order?.payment_method || '').trim().toLowerCase();
+  return paymentMethod !== 'cod' &&
+    paymentMethod !== 'loyalty_reward' &&
+    QUALIFYING_PAYMENT_STATUSES.has(paymentStatus) &&
+    Number(order?.subtotal) >= threshold;
+}
+
+async function syncRecentPaidLoyaltyOrders(customerId) {
+  const client = await db.pool.connect();
+
+  try {
+    await client.query('BEGIN');
+    await ensureLoyaltyCard(client, customerId);
+    const hasRewardColumn = await hasCustomerRewardColumn(client);
+
+    let cardResult = await client.query(
+      'SELECT * FROM loyalty_cards WHERE customer_id = $1 FOR UPDATE',
+      [customerId]
+    );
+    let card = cardResult.rows[0];
+    const now = new Date();
+
+    if (card.completed_at && !card.reward_redeemed_at) {
+      await client.query('COMMIT');
+      return;
+    }
+
+    if (card.expires_at && new Date(card.expires_at) <= now && !card.completed_at) {
+      await client.query(`
+        UPDATE loyalty_cards
+        SET stamp_count = 0,
+            first_stamp_at = NULL,
+            expires_at = NULL,
+            completed_at = NULL,
+            ${hasRewardColumn ? 'reward_product_id = NULL,' : ''}
+            updated_at = to_char(CURRENT_TIMESTAMP, 'YYYY-MM-DD HH24:MI:SS')
+        WHERE customer_id = $1
+      `, [customerId]);
+      cardResult = await client.query(
+        'SELECT * FROM loyalty_cards WHERE customer_id = $1 FOR UPDATE',
+        [customerId]
+      );
+      card = cardResult.rows[0];
+    }
+
+    const threshold = await getLoyaltyThreshold(client);
+    const orders = await client.query(`
+      SELECT o.id, o.subtotal, o.payment_status, o.payment_method,
+             COALESCE(NULLIF(o.payment_verified_at, ''), o.created_at)::timestamp
+               AT TIME ZONE 'UTC' AS paid_at
+      FROM orders o
+      WHERE o.customer_id = $1
+        AND LOWER(BTRIM(COALESCE(o.payment_method, ''))) NOT IN ('cod', 'loyalty_reward')
+        AND LOWER(BTRIM(COALESCE(o.payment_status, ''))) = ANY($2::text[])
+        AND o.subtotal >= $3
+        AND COALESCE(NULLIF(o.payment_verified_at, ''), o.created_at)::timestamp
+              >= (CURRENT_TIMESTAMP AT TIME ZONE 'UTC') - INTERVAL '6 months'
+        AND COALESCE(NULLIF(o.payment_verified_at, ''), o.created_at)::timestamp
+              <= CURRENT_TIMESTAMP AT TIME ZONE 'UTC'
+        AND NOT EXISTS (
+          SELECT 1 FROM loyalty_stamps ls WHERE ls.order_id = o.id
+        )
+        AND (
+          $4::timestamp IS NULL OR
+          COALESCE(NULLIF(o.payment_verified_at, ''), o.created_at)::timestamp > $4::timestamp
+        )
+      ORDER BY COALESCE(NULLIF(o.payment_verified_at, ''), o.created_at)::timestamp,
+               o.id
+      FOR UPDATE OF o
+    `, [
+      customerId,
+      [...QUALIFYING_PAYMENT_STATUSES],
+      threshold,
+      card.reward_redeemed_at || null,
+    ]);
+    const redemptionCutoff = card.reward_redeemed_at
+      ? new Date(card.reward_redeemed_at)
+      : null;
+
+    for (const order of orders.rows) {
+      const paidAt = order.paid_at instanceof Date
+        ? order.paid_at
+        : new Date(order.paid_at);
+      if (Number.isNaN(paidAt.getTime())) {
+        throw new Error(`Invalid paid timestamp for order ${order.id}.`);
+      }
+
+      if (card.completed_at && card.reward_redeemed_at) {
+        if (redemptionCutoff && paidAt <= redemptionCutoff) continue;
+        card = {
+          ...card,
+          stamp_count: 0,
+          first_stamp_at: null,
+          expires_at: null,
+          completed_at: null,
+          reward_redeemed_at: null,
+          reward_product_id: null,
+        };
+      }
+
+      if (card.expires_at && new Date(card.expires_at) <= paidAt && !card.completed_at) {
+        card = {
+          ...card,
+          stamp_count: 0,
+          first_stamp_at: null,
+          expires_at: null,
+          completed_at: null,
+          reward_product_id: null,
+        };
+      }
+
+      if (card.completed_at) break;
+
+      const firstStampAt = card.first_stamp_at || paidAt.toISOString();
+      const nextCount = Number(card.stamp_count || 0) + 1;
+      const completedAt = nextCount >= CARD_SIZE ? paidAt.toISOString() : null;
+      const expiresAt = card.expires_at || addMonths(firstStampAt, VALIDITY_MONTHS);
+
+      const stamp = await client.query(`
+        INSERT INTO loyalty_stamps (customer_id, order_id, awarded_at)
+        VALUES ($1, $2, $3)
+        ON CONFLICT (order_id) DO NOTHING
+        RETURNING id
+      `, [customerId, order.id, paidAt.toISOString()]);
+      if (stamp.rowCount !== 1) continue;
+
+      const customerParameter = hasRewardColumn ? '$6' : '$5';
+      const rewardAssignment = hasRewardColumn
+        ? 'reward_product_id = CASE WHEN $5 = 1 THEN NULL ELSE reward_product_id END,'
+        : '';
+      const updateParameters = hasRewardColumn
+        ? [
+            Math.min(nextCount, CARD_SIZE),
+            firstStampAt,
+            expiresAt,
+            completedAt,
+            Number(card.stamp_count || 0),
+            customerId,
+          ]
+        : [
+            Math.min(nextCount, CARD_SIZE),
+            firstStampAt,
+            expiresAt,
+            completedAt,
+            customerId,
+          ];
+      await client.query(`
+        UPDATE loyalty_cards
+        SET stamp_count = $1,
+            first_stamp_at = $2,
+            expires_at = $3,
+            completed_at = $4,
+            reward_redeemed_at = NULL,
+            ${rewardAssignment}
+            updated_at = to_char(CURRENT_TIMESTAMP, 'YYYY-MM-DD HH24:MI:SS')
+        WHERE customer_id = ${customerParameter}
+      `, updateParameters);
+
+      card = {
+        ...card,
+        stamp_count: Math.min(nextCount, CARD_SIZE),
+        first_stamp_at: firstStampAt,
+        expires_at: expiresAt,
+        completed_at: completedAt,
+        reward_redeemed_at: null,
+        reward_product_id: Number(card.stamp_count || 0) === 0 ? null : card.reward_product_id,
+      };
+    }
+
+    if (card.expires_at && new Date(card.expires_at) <= now && !card.completed_at) {
+      await client.query(`
+        UPDATE loyalty_cards
+        SET stamp_count = 0,
+            first_stamp_at = NULL,
+            expires_at = NULL,
+            completed_at = NULL,
+            ${hasRewardColumn ? 'reward_product_id = NULL,' : ''}
+            updated_at = to_char(CURRENT_TIMESTAMP, 'YYYY-MM-DD HH24:MI:SS')
+        WHERE customer_id = $1
+      `, [customerId]);
+    }
+
+    await client.query('COMMIT');
+  } catch (error) {
+    try {
+      await client.query('ROLLBACK');
+    } catch (rollbackError) {
+      console.error('[LOYALTY_SYNC_ROLLBACK_FAILED]', {
+        customerId,
+        message: rollbackError.message,
+        name: rollbackError.name,
+      });
+    }
+    throw error;
+  } finally {
+    client.release();
+  }
 }
 
 async function redeemLoyaltyReward(customerId, addressId) {
   const client = await db.pool.connect();
 
   try {
+    if (!await hasLoyaltyClaimSchema(client)) {
+      throw Object.assign(
+        new Error('Loyalty gift claiming is temporarily unavailable while the loyalty database update is pending.'),
+        { statusCode: 503 }
+      );
+    }
     await client.query('BEGIN');
 
     const normalizedAddressId = Number(addressId);
@@ -135,12 +385,9 @@ async function redeemLoyaltyReward(customerId, addressId) {
       throw Object.assign(new Error('A completed loyalty reward is required.'), { statusCode: 409 });
     }
 
-    const settingResult = await client.query(
-      'SELECT reward_product_id FROM loyalty_settings WHERE id = 1 FOR SHARE'
-    );
-    const rewardProductId = Number(settingResult.rows[0]?.reward_product_id);
+    const rewardProductId = Number(card.reward_product_id);
     if (!Number.isSafeInteger(rewardProductId) || rewardProductId < 1) {
-      throw Object.assign(new Error('A reward product has not been selected yet.'), { statusCode: 409 });
+      throw Object.assign(new Error('PAARA has not selected your jewellery gift yet.'), { statusCode: 409 });
     }
 
     const productResult = await client.query(`
@@ -234,6 +481,7 @@ async function redeemLoyaltyReward(customerId, addressId) {
           expires_at = NULL,
           completed_at = NULL,
           reward_redeemed_at = $1,
+          reward_product_id = NULL,
           updated_at = to_char(CURRENT_TIMESTAMP, 'YYYY-MM-DD HH24:MI:SS')
       WHERE customer_id = $2
     `, [redeemedAt, customerId]);
@@ -307,14 +555,8 @@ async function processLoyaltyOrder(orderId, customerId) {
       };
     }
 
-    const paymentStatus = String(order.payment_status || '').trim().toLowerCase();
-    const paymentMethod = String(order.payment_method || '').trim().toLowerCase();
-
     const threshold = await getLoyaltyThreshold(client);
-    const qualifies =
-      paymentMethod === 'payu' &&
-      paymentStatus === 'paid' &&
-      Number(order.subtotal) >= threshold;
+    const qualifies = isQualifyingLoyaltyOrder(order, threshold);
 
     if (!qualifies) {
       const state = await getLoyaltyState(customerId, client);
@@ -467,9 +709,14 @@ async function processLoyaltyOrder(orderId, customerId) {
 
 module.exports = {
   CARD_SIZE,
+  QUALIFYING_PAYMENT_STATUSES,
+  isQualifyingLoyaltyOrder,
   getLoyaltyThreshold,
   getLoyaltyRewardProduct,
   getLoyaltyState,
+  hasCustomerRewardColumn,
+  hasLoyaltyClaimSchema,
+  syncRecentPaidLoyaltyOrders,
   processLoyaltyOrder,
   redeemLoyaltyReward,
 };

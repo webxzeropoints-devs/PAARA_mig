@@ -1,11 +1,8 @@
-ALTER TABLE "loyalty_settings"
+ALTER TABLE "loyalty_cards"
 ADD COLUMN "reward_product_id" INTEGER;
 
-CREATE UNIQUE INDEX "loyalty_settings_reward_product_id_key"
-ON "loyalty_settings"("reward_product_id");
-
-ALTER TABLE "loyalty_settings"
-ADD CONSTRAINT "loyalty_settings_reward_product_id_fkey"
+ALTER TABLE "loyalty_cards"
+ADD CONSTRAINT "loyalty_cards_reward_product_id_fkey"
 FOREIGN KEY ("reward_product_id") REFERENCES "products"("id")
 ON DELETE SET NULL ON UPDATE CASCADE;
 

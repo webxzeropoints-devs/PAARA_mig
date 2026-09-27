@@ -46,11 +46,11 @@ export default function AdminPromotions() {
 
   const [couponEditor, setCouponEditor] = useState(null);
   const [loyaltyThreshold, setLoyaltyThreshold] = useState("");
-  const [rewardProductId, setRewardProductId] = useState("");
   const [rewardProducts, setRewardProducts] = useState([]);
   const [eligibleCustomers, setEligibleCustomers] = useState([]);
   const [loadingEligible, setLoadingEligible] = useState(false);
-  const [rewardPickerOpen, setRewardPickerOpen] = useState(false);
+  const [rewardPickerCustomer, setRewardPickerCustomer] = useState(null);
+  const [savingRewardCustomer, setSavingRewardCustomer] = useState(null);
   const [loyaltySaving, setLoyaltySaving] = useState(false);
   const [loyaltyError, setLoyaltyError] = useState("");
 
@@ -72,17 +72,28 @@ export default function AdminPromotions() {
     setLoadingEligible(true);
     setLoyaltyError("");
     try {
-      const [settings, products, customers] = await Promise.all([
+      const results = await Promise.allSettled([
         adminRequest("/admin/loyalty-settings"),
         adminRequest("/admin/products"),
         adminRequest("/admin/loyalty-eligible"),
       ]);
-      setLoyaltyThreshold(String(settings?.reward_threshold ?? ""));
-      setRewardProductId(settings?.reward_product_id ? String(settings.reward_product_id) : "");
-      setRewardProducts(Array.isArray(products) ? products : []);
-      setEligibleCustomers(Array.isArray(customers) ? customers : []);
-    } catch (err) {
-      setLoyaltyError(err.message || "Could not load loyalty settings.");
+      const errors = [];
+      if (results[0].status === "fulfilled") {
+        setLoyaltyThreshold(String(results[0].value?.reward_threshold ?? ""));
+      } else {
+        errors.push(results[0].reason?.message || "Could not load loyalty settings.");
+      }
+      if (results[1].status === "fulfilled") {
+        setRewardProducts(Array.isArray(results[1].value) ? results[1].value : []);
+      } else {
+        errors.push(results[1].reason?.message || "Could not load reward products.");
+      }
+      if (results[2].status === "fulfilled") {
+        setEligibleCustomers(Array.isArray(results[2].value) ? results[2].value : []);
+      } else {
+        errors.push(results[2].reason?.message || "Could not load eligible customers.");
+      }
+      setLoyaltyError(errors.join(" "));
     } finally {
       setLoadingLoyalty(false);
       setLoadingEligible(false);
@@ -117,7 +128,6 @@ export default function AdminPromotions() {
         method: "PUT",
         body: {
           reward_threshold,
-          reward_product_id: rewardProductId ? Number(rewardProductId) : null,
         },
       });
       await loadLoyaltyRules();
@@ -125,6 +135,23 @@ export default function AdminPromotions() {
       setLoyaltyError(err.message || "Could not save loyalty settings.");
     } finally {
       setLoyaltySaving(false);
+    }
+  };
+
+  const setCustomerReward = async (customerId, productId) => {
+    setSavingRewardCustomer(customerId);
+    setLoyaltyError("");
+    try {
+      await adminRequest(`/admin/loyalty-eligible/${customerId}/reward`, {
+        method: "PUT",
+        body: { reward_product_id: productId },
+      });
+      setRewardPickerCustomer(null);
+      await loadLoyaltyRules();
+    } catch (err) {
+      setLoyaltyError(err.message || "Could not save this customer's gift.");
+    } finally {
+      setSavingRewardCustomer(null);
     }
   };
 
@@ -245,7 +272,7 @@ export default function AdminPromotions() {
           <div className="mb-4">
             <p className="text-[10px] uppercase tracking-[.28em] text-gold">Customer rewards</p>
             <h2 className="mt-2 font-display text-3xl text-cocoa">Loyalty Card</h2>
-            <p className="mt-2 text-sm text-cocoa/60">Set the earning rule and choose the jewellery gift customers can claim after six stamps.</p>
+            <p className="mt-2 text-sm text-cocoa/60">Set the earning rule, then choose a jewellery gift separately for each eligible customer.</p>
           </div>
 
           {loyaltyError && <p className="mb-5 border border-gold/40 bg-shell px-4 py-3 text-sm text-cocoa">{loyaltyError}</p>}
@@ -256,23 +283,10 @@ export default function AdminPromotions() {
                 Qualifying order threshold
                 <input required min="0.01" step="0.01" type="number" value={loyaltyThreshold} onChange={(e) => setLoyaltyThreshold(e.target.value)} placeholder="₹ amount" className="mt-2 w-full border border-cocoa/20 bg-sand px-3 py-2 text-sm text-cocoa outline-none focus:border-gold" />
               </label>
-              <div>
-                <span className="block text-xs uppercase tracking-widest text-cocoa/60">Jewellery gift after six stamps</span>
-                <div className="mt-2 flex flex-wrap items-center gap-3">
-                  {rewardProductId ? (
-                    <RewardProductCard
-                      product={rewardProducts.find((item) => String(item.id) === rewardProductId)}
-                      onChange={() => setRewardPickerOpen(true)}
-                      onClear={() => setRewardProductId("")}
-                    />
-                  ) : (
-                    <button type="button" onClick={() => setRewardPickerOpen(true)} className="min-h-12 border border-dashed border-gold/50 px-4 text-xs uppercase tracking-widest text-cocoa hover:bg-sand">+ Choose jewellery gift</button>
-                  )}
-                </div>
-              </div>
+              <p className="text-xs leading-relaxed text-cocoa/65">Choose each eligible customer’s gift beside their name below. The gift assignment does not change the stamp threshold or earning rules.</p>
             </div>
             <div className="mt-5 flex flex-wrap items-center justify-between gap-3 border-t border-cocoa/10 pt-4">
-              <p className="max-w-2xl text-xs leading-relaxed text-cocoa/65">One stamp per paid qualifying online order. Customers need six stamps within six months. A claimed gift creates a ₹0 order with free delivery and standard order tracking.</p>
+              <p className="max-w-2xl text-xs leading-relaxed text-cocoa/65">One stamp per paid qualifying non-COD order, including admin-verified manual payments. Customers need six stamps within six months. A claimed gift creates a ₹0 order with free delivery and standard order tracking.</p>
               <button type="submit" disabled={loyaltySaving || loadingLoyalty} className="bg-gold px-4 py-2 text-xs uppercase tracking-widest text-sand hover:bg-cocoa disabled:opacity-50">{loyaltySaving ? "Saving..." : "Save loyalty settings"}</button>
             </div>
           </form>
@@ -281,14 +295,19 @@ export default function AdminPromotions() {
             <div className="flex flex-wrap items-center justify-between gap-3 border-b border-gold/25 px-5 py-4">
               <div>
                 <h3 className="font-display text-2xl text-cocoa">Customer eligibility &amp; claims</h3>
-                <p className="mt-1 text-xs text-cocoa/60">Six-stamp customers can claim the configured gift. Claimed gifts appear as normal orders for fulfilment.</p>
+                <p className="mt-1 text-xs text-cocoa/60">Assign a gift beside each eligible customer. Claimed gifts appear as normal orders for fulfilment.</p>
               </div>
               <button type="button" onClick={loadLoyaltyRules} disabled={loadingEligible} className="border border-cocoa/20 px-3 py-2 text-[10px] uppercase tracking-widest text-cocoa hover:border-gold disabled:opacity-50">{loadingEligible ? "Refreshing..." : "Refresh"}</button>
             </div>
             <div className="overflow-x-auto">
               <table className="w-full min-w-[720px] text-sm">
                 <thead className="border-b border-gold/25 text-left text-[10px] uppercase tracking-widest text-cocoa/60">
-                  <tr><th className="px-4 py-3">Customer</th><th className="px-4 py-3">Stamps</th><th className="px-4 py-3">Reward</th><th className="px-4 py-3">Claim / delivery</th></tr>
+                  <tr>
+                    <th className="px-4 py-3">Customer</th>
+                    <th className="px-4 py-3">Stamps</th>
+                    <th className="px-4 py-3">Gift for this customer</th>
+                    <th className="px-4 py-3">Claim / delivery</th>
+                  </tr>
                 </thead>
                 <tbody>
                   {eligibleCustomers.map((customer) => {
@@ -297,7 +316,18 @@ export default function AdminPromotions() {
                       <tr key={customer.customer_id} className="border-b border-cocoa/10 odd:bg-sand/35">
                         <td className="px-4 py-3"><p className="font-medium text-cocoa">{customer.name}</p><p className="text-xs text-cocoa/55">{customer.email}</p></td>
                         <td className="px-4 py-3">{customer.stamp_count} / 6</td>
-                        <td className="px-4 py-3"><span className={`text-[10px] uppercase tracking-widest ${isEligible ? "text-gold" : "text-cocoa/55"}`}>{isEligible ? "Eligible to claim" : customer.claimed_at || customer.claim_order_id ? "Claimed" : customer.completed_at ? "Claimed" : "Collecting stamps"}</span></td>
+                        <td className="px-4 py-3">
+                          {isEligible ? (
+                            <RewardProductCard
+                              product={rewardProducts.find((product) => String(product.id) === String(customer.reward_product_id))}
+                              onChange={() => setRewardPickerCustomer({ customerId: customer.customer_id, selectedId: customer.reward_product_id ? String(customer.reward_product_id) : "" })}
+                              onClear={() => setCustomerReward(customer.customer_id, null)}
+                              saving={savingRewardCustomer === customer.customer_id}
+                            />
+                          ) : (
+                            <span className={`text-[10px] uppercase tracking-widest ${customer.claimed_at || customer.claim_order_id || customer.completed_at ? "text-cocoa/55" : "text-cocoa/40"}`}>{customer.claimed_at || customer.claim_order_id || customer.completed_at ? "Claimed" : "Collecting stamps"}</span>
+                          )}
+                        </td>
                         <td className="px-4 py-3">{customer.claim_order_number ? <><span className="block font-medium text-cocoa">{customer.claimed_product_name || "Jewellery gift"}</span><span className="text-xs text-cocoa/60">{customer.claim_order_number} · {customer.claim_order_status || "Order Confirmed"}</span></> : isEligible ? <span className="text-xs text-cocoa/55">Waiting for customer claim</span> : customer.claimed_at ? <span className="text-xs text-cocoa/40">Claimed order record unavailable</span> : <span className="text-xs text-cocoa/40">—</span>}</td>
                       </tr>
                     );
@@ -322,33 +352,33 @@ export default function AdminPromotions() {
           />
         )}
       </AnimatePresence>
-      {rewardPickerOpen && (
+      {rewardPickerCustomer && (
         <RewardProductPicker
           products={rewardProducts.filter((product) => toBoolean(product.is_active))}
-          selectedId={rewardProductId}
+          selectedId={rewardPickerCustomer.selectedId}
           onChoose={(productId) => {
-            setRewardProductId(String(productId));
-            setRewardPickerOpen(false);
+            setCustomerReward(rewardPickerCustomer.customerId, productId);
           }}
-          onClose={() => setRewardPickerOpen(false)}
+          onClose={() => setRewardPickerCustomer(null)}
         />
       )}
     </div>
   );
 }
 
-function RewardProductCard({ product, onChange, onClear }) {
+function RewardProductCard({ product, onChange, onClear, saving }) {
   return (
     <div className="flex items-center gap-3 border border-gold/40 bg-sand p-2">
       <div className="grid h-12 w-12 shrink-0 place-items-center bg-shell">
         {product?.images?.[0] ? <img src={product.images[0]} alt="" className="h-full w-full object-cover" /> : <ImageOff size={17} className="text-cocoa/40" />}
       </div>
       <div className="min-w-0">
-        <p className="max-w-[15rem] truncate font-product-name text-sm text-cocoa">{product?.name || "Selected reward"}</p>
-        <p className="text-[10px] text-cocoa/55">{product ? `Stock: ${product.stock}` : "This product is unavailable"}</p>
+        <p className="max-w-[15rem] truncate font-product-name text-sm text-cocoa">{product?.name || "No gift selected"}</p>
+        <p className="text-[10px] text-cocoa/55">{product ? `Stock: ${product.stock}` : "Choose a gift for this customer"}</p>
       </div>
-      <button type="button" onClick={onChange} className="text-[10px] uppercase tracking-widest text-gold hover:text-cocoa">Change</button>
-      <button type="button" onClick={onClear} className="p-1 text-cocoa/50 hover:text-cocoa" aria-label="Clear reward product"><X size={15} /></button>
+      <button type="button" onClick={onChange} disabled={saving} className="text-[10px] uppercase tracking-widest text-gold hover:text-cocoa disabled:opacity-50">{product ? "Change" : "Choose gift"}</button>
+      {product && <button type="button" onClick={onClear} disabled={saving} className="p-1 text-cocoa/50 hover:text-cocoa disabled:opacity-50" aria-label="Clear reward product"><X size={15} /></button>}
+      {saving && <span className="text-[10px] text-cocoa/55">Saving…</span>}
     </div>
   );
 }

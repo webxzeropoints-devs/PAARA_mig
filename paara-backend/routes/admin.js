@@ -1,7 +1,12 @@
 const express = require('express');
 const db = require('../db/database.pg');
 const { requireAdmin } = require('../middleware/admin');
-const { processLoyaltyOrder } = require('../services/loyalty');
+const {
+  getLoyaltyThreshold,
+  processLoyaltyOrder,
+  QUALIFYING_PAYMENT_STATUSES,
+  syncRecentPaidLoyaltyOrders,
+} = require('../services/loyalty');
 const publicImageUrl = require('../utils/publicImageUrl');
 const publicHomepageImageUrl = require('../utils/publicHomepageImageUrl');
 const mediaStore = require('../utils/mediaStore');
@@ -2395,31 +2400,13 @@ router.delete('/gift-card-rules/:id', async (q, s) => {
 router.get('/loyalty-settings', async (q, s) => {
   try {
     const result = await db.query(`
-      SELECT ls.reward_threshold, ls.reward_product_id,
-             p.name AS reward_product_name, p.stock AS reward_product_stock,
-             (
-               SELECT pi.image_url
-               FROM product_images pi
-               WHERE pi.product_id = p.id
-               ORDER BY pi.sort_order ASC, pi.id ASC
-               LIMIT 1
-             ) AS reward_product_image
-      FROM loyalty_settings ls
-      LEFT JOIN products p ON p.id = ls.reward_product_id
-      WHERE ls.id = 1
+      SELECT reward_threshold
+      FROM loyalty_settings
+      WHERE id = 1
     `);
     const settings = result.rows[0];
     return s.json({
       reward_threshold: Number(settings?.reward_threshold || 19),
-      reward_product_id: settings?.reward_product_id || null,
-      reward_product: settings?.reward_product_id
-        ? {
-            id: settings.reward_product_id,
-            name: settings.reward_product_name,
-            stock: settings.reward_product_stock,
-            image_url: publicImageUrl(settings.reward_product_image),
-          }
-        : null,
       stamps_required: 6,
       validity_months: 6,
     });
@@ -2431,44 +2418,22 @@ router.get('/loyalty-settings', async (q, s) => {
 
 router.put('/loyalty-settings', async (q, s) => {
   const threshold = Number(q.body?.reward_threshold);
-  const rawRewardProductId = q.body?.reward_product_id;
-  const rewardProductId = rawRewardProductId == null || rawRewardProductId === ''
-    ? null
-    : Number(rawRewardProductId);
 
   if (!Number.isFinite(threshold) || threshold <= 0) {
     return s.status(400).json({ error: 'Enter a valid loyalty threshold.' });
   }
-  if (
-    rewardProductId !== null &&
-    (!Number.isSafeInteger(rewardProductId) || rewardProductId < 1)
-  ) {
-    return s.status(400).json({ error: 'Choose a valid reward product.' });
-  }
 
   try {
-    if (rewardProductId !== null) {
-      const product = await db.query(
-        'SELECT 1 FROM products WHERE id = $1 AND is_active = TRUE',
-        [rewardProductId]
-      );
-      if (product.rowCount === 0) {
-        return s.status(400).json({ error: 'Choose an active reward product.' });
-      }
-    }
-
     const result = await db.query(`
-      INSERT INTO loyalty_settings (id, reward_threshold, reward_product_id, updated_at)
-      VALUES (1, $1, $2, to_char(CURRENT_TIMESTAMP, 'YYYY-MM-DD HH24:MI:SS'))
+      INSERT INTO loyalty_settings (id, reward_threshold, updated_at)
+      VALUES (1, $1, to_char(CURRENT_TIMESTAMP, 'YYYY-MM-DD HH24:MI:SS'))
       ON CONFLICT (id) DO UPDATE
       SET reward_threshold = EXCLUDED.reward_threshold,
-          reward_product_id = EXCLUDED.reward_product_id,
           updated_at = EXCLUDED.updated_at
-      RETURNING reward_threshold, reward_product_id
-    `, [threshold, rewardProductId]);
+      RETURNING reward_threshold
+    `, [threshold]);
     return s.json({
       reward_threshold: Number(result.rows[0].reward_threshold),
-      reward_product_id: result.rows[0].reward_product_id,
     });
   } catch (error) {
     console.error('[ADMIN_LOYALTY_SETTINGS_UPDATE_FAILED]', error.message);
@@ -2476,13 +2441,96 @@ router.put('/loyalty-settings', async (q, s) => {
   }
 });
 
+router.put('/loyalty-eligible/:customerId/reward', async (q, s) => {
+  const customerId = Number(q.params.customerId);
+  const rawProductId = q.body?.reward_product_id;
+  const productId = rawProductId == null || rawProductId === ''
+    ? null
+    : Number(rawProductId);
+
+  if (!Number.isSafeInteger(customerId) || customerId < 1) {
+    return s.status(400).json({ error: 'A valid customer is required.' });
+  }
+  if (productId !== null && (!Number.isSafeInteger(productId) || productId < 1)) {
+    return s.status(400).json({ error: 'Choose a valid jewellery gift.' });
+  }
+
+  try {
+    const schema = await db.query(`
+      SELECT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = current_schema()
+          AND table_name = 'loyalty_cards'
+          AND column_name = 'reward_product_id'
+      ) AS ready
+    `);
+    if (!schema.rows[0]?.ready) {
+      return s.status(503).json({
+        error: 'Customer gift assignment is unavailable until the loyalty database update is applied.',
+      });
+    }
+
+    if (productId !== null) {
+      const product = await db.query(
+        'SELECT 1 FROM products WHERE id = $1 AND is_active = TRUE',
+        [productId]
+      );
+      if (product.rowCount === 0) {
+        return s.status(400).json({ error: 'Choose an active jewellery gift.' });
+      }
+    }
+
+    const updated = await db.query(`
+      UPDATE loyalty_cards
+      SET reward_product_id = $2,
+          updated_at = to_char(CURRENT_TIMESTAMP, 'YYYY-MM-DD HH24:MI:SS')
+      WHERE customer_id = $1
+        AND completed_at IS NOT NULL
+        AND reward_redeemed_at IS NULL
+      RETURNING customer_id, reward_product_id
+    `, [customerId, productId]);
+
+    if (updated.rowCount === 0) {
+      return s.status(409).json({ error: 'This customer is not currently eligible for a gift.' });
+    }
+    return s.json(updated.rows[0]);
+  } catch (error) {
+    console.error('[ADMIN_LOYALTY_REWARD_ASSIGN_FAILED]', {
+      customerId,
+      message: error.message,
+      name: error.name,
+    });
+    return s.status(500).json({ error: 'Could not assign this customer’s jewellery gift.' });
+  }
+});
+
 router.get('/loyalty-eligible', async (q, s) => {
   try {
+    const threshold = await getLoyaltyThreshold();
+    const candidateCustomers = await db.query(`
+      SELECT DISTINCT o.customer_id
+      FROM orders o
+      WHERE LOWER(BTRIM(COALESCE(o.payment_method, ''))) NOT IN ('cod', 'loyalty_reward')
+        AND LOWER(BTRIM(COALESCE(o.payment_status, ''))) = ANY($1::text[])
+        AND o.subtotal >= $2
+        AND COALESCE(NULLIF(o.payment_verified_at, ''), o.created_at)::timestamp
+              >= (CURRENT_TIMESTAMP AT TIME ZONE 'UTC') - INTERVAL '6 months'
+        AND COALESCE(NULLIF(o.payment_verified_at, ''), o.created_at)::timestamp
+              <= CURRENT_TIMESTAMP AT TIME ZONE 'UTC'
+        AND NOT EXISTS (
+          SELECT 1 FROM loyalty_stamps ls WHERE ls.order_id = o.id
+        )
+    `, [[...QUALIFYING_PAYMENT_STATUSES], threshold]);
+    for (const candidate of candidateCustomers.rows) {
+      await syncRecentPaidLoyaltyOrders(candidate.customer_id);
+    }
+
     const result = await db.query(`
       SELECT c.id AS customer_id, c.name, c.email, c.phone,
              COALESCE(lc.stamp_count, 0)::int AS stamp_count,
              lc.completed_at,
              lc.reward_redeemed_at,
+             NULLIF(to_jsonb(lc)->>'reward_product_id', '')::integer AS reward_product_id,
              latest.order_id AS claim_order_id,
              latest.order_number AS claim_order_number,
              latest.order_status AS claim_order_status,
@@ -2495,11 +2543,14 @@ router.get('/loyalty-eligible', async (q, s) => {
       FROM customers c
       LEFT JOIN loyalty_cards lc ON lc.customer_id = c.id
       LEFT JOIN LATERAL (
-        SELECT r.order_id, r.redeemed_at, p.name AS product_name,
+        SELECT NULLIF(to_jsonb(r)->>'order_id', '')::integer AS order_id,
+               r.redeemed_at, p.name AS product_name,
                o.order_number, o.status AS order_status
         FROM loyalty_reward_redemptions r
-        LEFT JOIN products p ON p.id = r.product_id
-        LEFT JOIN orders o ON o.id = r.order_id
+        LEFT JOIN products p
+          ON p.id = NULLIF(to_jsonb(r)->>'product_id', '')::integer
+        LEFT JOIN orders o
+          ON o.id = NULLIF(to_jsonb(r)->>'order_id', '')::integer
         WHERE r.customer_id = c.id
         ORDER BY r.redeemed_at DESC, r.id DESC
         LIMIT 1

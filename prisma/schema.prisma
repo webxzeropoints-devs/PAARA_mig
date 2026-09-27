@@ -59,7 +59,7 @@ model Product {
   orderItems       OrderItem[]
   instagramReviews InstagramReview[]
   giftCardRule     GiftCardRule?
-  loyaltyRewardSetting LoyaltySettings?
+  loyaltyRewardCards LoyaltyCard[]
   loyaltyRewardRedemptions LoyaltyRewardRedemption[]
   wishlists        Wishlist[]
   vaultProduct     VaultProduct?
@@ -251,10 +251,12 @@ model LoyaltyCard {
   expiresAt         String?  @map("expires_at")
   completedAt       String?  @map("completed_at")
   rewardRedeemedAt  String?  @map("reward_redeemed_at")
+  rewardProductId   Int?     @map("reward_product_id")
   createdAt         String   @default(dbgenerated("to_char(CURRENT_TIMESTAMP, 'YYYY-MM-DD HH24:MI:SS')")) @map("created_at")
   updatedAt         String   @default(dbgenerated("to_char(CURRENT_TIMESTAMP, 'YYYY-MM-DD HH24:MI:SS')")) @map("updated_at")
 
   customer          Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  rewardProduct     Product? @relation(fields: [rewardProductId], references: [id], onDelete: SetNull)
 
   @@map("loyalty_cards")
 }
@@ -311,10 +313,7 @@ model LoyaltyRewardRedemption {
 model LoyaltySettings {
   id              Int     @id
   rewardThreshold Decimal @map("reward_threshold") @db.Decimal(12, 2)
-  rewardProductId Int?    @unique @map("reward_product_id")
   updatedAt       String  @default(dbgenerated("to_char(CURRENT_TIMESTAMP, 'YYYY-MM-DD HH24:MI:SS')")) @map("updated_at")
-
-  rewardProduct Product? @relation(fields: [rewardProductId], references: [id], onDelete: SetNull)
 
   @@map("loyalty_settings")
 }

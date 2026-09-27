@@ -5,6 +5,7 @@ const {
   getLoyaltyThreshold,
   processLoyaltyOrder,
   redeemLoyaltyReward,
+  syncRecentPaidLoyaltyOrders,
 } = require('../services/loyalty');
 const db = require('../db/database.pg');
 
@@ -24,6 +25,7 @@ router.get('/', requireAuth, async (req, res) => {
   try {
     res.set('Cache-Control', 'no-store');
 
+    await syncRecentPaidLoyaltyOrders(req.customer.id);
     const state = await getLoyaltyState(req.customer.id);
 
     return res.json(state);

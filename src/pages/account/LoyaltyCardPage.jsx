@@ -8,6 +8,8 @@ import { claimLoyaltyReward, getAddresses, getLoyaltyStatus, getToken } from "..
 export default function LoyaltyCardPage() {
   const [loyalty, setLoyalty] = useState(null);
   const [error, setError] = useState("");
+  const [addressError, setAddressError] = useState("");
+  const [addressLoading, setAddressLoading] = useState(true);
   const [addresses, setAddresses] = useState([]);
   const [addressId, setAddressId] = useState("");
   const [claiming, setClaiming] = useState(false);
@@ -16,14 +18,30 @@ export default function LoyaltyCardPage() {
 
   useEffect(() => {
     if (!authed) return;
-    Promise.all([getLoyaltyStatus(), getAddresses()])
-      .then(([state, savedAddresses]) => {
-        setLoyalty(state);
+    let active = true;
+    getLoyaltyStatus()
+      .then((state) => {
+        if (active) setLoyalty(state);
+      })
+      .catch((err) => {
+        if (active) setError(err?.message || "Could not load your PAARA Loyalty Card.");
+      });
+    getAddresses()
+      .then((savedAddresses) => {
+        if (!active) return;
         const list = Array.isArray(savedAddresses) ? savedAddresses : [];
         setAddresses(list);
         setAddressId((current) => current || String(list.find((item) => item.is_default)?.id || list[0]?.id || ""));
       })
-      .catch((err) => setError(err?.message || "Could not load your PAARA Loyalty Card."));
+      .catch((err) => {
+        if (active) setAddressError(err?.message || "Could not load your saved addresses.");
+      })
+      .finally(() => {
+        if (active) setAddressLoading(false);
+      });
+    return () => {
+      active = false;
+    };
   }, [authed]);
 
   if (!authed) {
@@ -54,6 +72,7 @@ export default function LoyaltyCardPage() {
     <AccountPageLayout title="Loyalty Card" subtitle={loyalty ? `Earn one stamp on each qualifying order of ₹${Number(loyalty.threshold).toLocaleString("en-IN")} or more.` : "Loading your loyalty threshold…"}>
       <Seo title="Loyalty Card" description="View your PAARA Jewellery Loyalty Card and server-synced stamps." />
       {error && <p className="mb-5 bg-red-50 px-4 py-3 text-xs text-red-700">{error}</p>}
+      {addressError && <p className="mb-5 bg-red-50 px-4 py-3 text-xs text-red-700">{addressError}</p>}
       <div className="space-y-6">
         <LoyaltyCard stampsCount={count} animateOnMount />
         {!loyalty ? (
@@ -71,7 +90,7 @@ export default function LoyaltyCardPage() {
                 </div>
               </div>
             ) : loyalty.rewardEligible ? (
-              <p className="mt-3 text-cocoa/65">Your reward is unlocked. The store is preparing the gift selection; please check back soon.</p>
+              <p className="mt-3 text-cocoa/65">Your reward is unlocked. PAARA is selecting your jewellery gift; check back soon.</p>
             ) : (
               <p className="mt-2 text-cocoa/65">Complete six stamps within six months to receive the jewellery gift selected by PAARA. The reward cannot be exchanged for cash.</p>
             )}
@@ -84,6 +103,10 @@ export default function LoyaltyCardPage() {
                       {addresses.map((address) => <option key={address.id} value={address.id}>{address.line1}, {address.city}, {address.state} {address.pincode}{address.is_default ? " (Default)" : ""}</option>)}
                     </select>
                   </label>
+                ) : addressLoading ? (
+                  <p className="mt-4 text-xs text-cocoa/55">Loading your saved delivery addresses…</p>
+                ) : addressError ? (
+                  <p className="mt-4 text-xs text-cocoa/60">Your saved addresses could not be loaded. Refresh this page to try again.</p>
                 ) : (
                   <Link to="/account/addresses" className="mt-4 inline-block text-sm text-gold underline">Add a delivery address to claim</Link>
                 )}
