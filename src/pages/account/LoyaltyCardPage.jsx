@@ -19,13 +19,17 @@ export default function LoyaltyCardPage() {
   useEffect(() => {
     if (!authed) return;
     let active = true;
-    getLoyaltyStatus()
-      .then((state) => {
-        if (active) setLoyalty(state);
-      })
-      .catch((err) => {
-        if (active) setError(err?.message || "Could not load your PAARA Loyalty Card.");
-      });
+    const refreshLoyalty = () => {
+      getLoyaltyStatus()
+        .then((state) => {
+          if (active) setLoyalty(state);
+        })
+        .catch((err) => {
+          if (active) setError(err?.message || "Could not load your PAARA Loyalty Card.");
+        });
+    };
+    refreshLoyalty();
+    window.addEventListener("focus", refreshLoyalty);
     getAddresses()
       .then((savedAddresses) => {
         if (!active) return;
@@ -41,8 +45,26 @@ export default function LoyaltyCardPage() {
       });
     return () => {
       active = false;
+      window.removeEventListener("focus", refreshLoyalty);
     };
   }, [authed]);
+
+  useEffect(() => {
+    if (!authed || !loyalty?.expiresAt) return undefined;
+
+    const expiresAt = new Date(loyalty.expiresAt).getTime();
+    if (!Number.isFinite(expiresAt)) return undefined;
+
+    const timer = window.setTimeout(() => {
+      getLoyaltyStatus()
+        .then(setLoyalty)
+        .catch((err) => {
+          setError(err?.message || "Could not refresh your expired loyalty card.");
+        });
+    }, Math.max(0, expiresAt - Date.now()));
+
+    return () => window.clearTimeout(timer);
+  }, [authed, loyalty?.expiresAt]);
 
   if (!authed) {
     return <AccountPageLayout title="Loyalty Card" subtitle="Your server-synced digital loyalty card."><Link to="/login" className="inline-block bg-gold px-7 py-3 text-xs uppercase tracking-widest text-white">Sign in to view your card</Link></AccountPageLayout>;
@@ -74,7 +96,7 @@ export default function LoyaltyCardPage() {
       {error && <p className="mb-5 bg-red-50 px-4 py-3 text-xs text-red-700">{error}</p>}
       {addressError && <p className="mb-5 bg-red-50 px-4 py-3 text-xs text-red-700">{addressError}</p>}
       <div className="space-y-6">
-        <LoyaltyCard stampsCount={count} animateOnMount />
+        <LoyaltyCard stampsCount={count} threshold={loyalty?.threshold} animateOnMount />
         {!loyalty ? (
           <p className="max-w-xl text-sm text-cocoa/60">Loading your loyalty card balance…</p>
         ) : (

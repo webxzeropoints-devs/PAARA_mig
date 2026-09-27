@@ -13,6 +13,7 @@ const { createInvoicePdf } = require('../utils/invoice');
 const { maskSensitiveText } = require('../utils/validate');
 const { createOrder } = require('./orders');
 const { processLoyaltyOrder } = require('../services/loyalty');
+const { buildLoyaltyReceipt } = require('../utils/loyaltyReceipt');
 
 const router = express.Router();
 
@@ -64,9 +65,9 @@ async function markOrderPaid(orderId, paymentReference) {
   }
 }
 
-async function sendPaidInvoice(orderId) {
+async function sendPaidInvoice(orderId, loyaltyResult) {
   const { rows: orderRows } = await db.query(`
-    SELECT o.*, c.email, c.name
+    SELECT o.*, c.email, c.name, c.phone
     FROM orders o
     JOIN customers c ON c.id = o.customer_id
     WHERE o.id = $1
@@ -96,7 +97,8 @@ async function sendPaidInvoice(orderId) {
 
   const address = addressRows[0];
 
-  const pdf = await createInvoicePdf(order, items, address);
+  const loyaltyReceipt = buildLoyaltyReceipt(loyaltyResult);
+  const pdf = await createInvoicePdf(order, items, address, loyaltyReceipt);
 
   const orderDate = order.created_at
     ? new Date(order.created_at).toLocaleString('en-IN', {
@@ -107,27 +109,6 @@ async function sendPaidInvoice(orderId) {
         dateStyle: 'medium',
         timeStyle: 'short',
       });
-
-  const itemLines = items
-    .map((item, index) => {
-      const unitPrice = Number(item.unit_price || 0).toLocaleString('en-IN', {
-        minimumFractionDigits: 2,
-        maximumFractionDigits: 2,
-      });
-
-      const lineTotal = Number(item.line_total || 0).toLocaleString('en-IN', {
-        minimumFractionDigits: 2,
-        maximumFractionDigits: 2,
-      });
-
-      return [
-        `${index + 1}. ${item.product_name}`,
-        `   Quantity: ${item.quantity}`,
-        `   Unit Price: INR ${unitPrice}`,
-        `   Item Total: INR ${lineTotal}`,
-      ].join('\n');
-    })
-    .join('\n\n');
 
   const addressText = address
     ? [
@@ -157,48 +138,117 @@ async function sendPaidInvoice(orderId) {
     maximumFractionDigits: 2,
   });
 
+  const gstAmount = Number(order.gst_amount || 0).toLocaleString('en-IN', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+  const discountAmount = Number(order.discount_amount || 0).toLocaleString('en-IN', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+  const formatMoney = (value) => `INR ${Number(value || 0).toLocaleString('en-IN', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })}`;
+  const escapeHtml = (value) => String(value ?? '').replace(/[&<>"']/g, (character) => ({
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    '"': '&quot;',
+    "'": '&#39;',
+  })[character]);
+  const htmlItems = items.map((item) => `
+    <tr>
+      <td style="padding:12px 8px;border-bottom:1px solid #eee7df;color:#30251f">${escapeHtml(item.product_name)}<br><span style="font-size:12px;color:#8b6b43">Unit ${formatMoney(item.unit_price)}</span></td>
+      <td style="padding:12px 8px;border-bottom:1px solid #eee7df;text-align:center;color:#30251f">${Number(item.quantity) || 0}</td>
+      <td style="padding:12px 8px;border-bottom:1px solid #eee7df;text-align:right;color:#30251f">${formatMoney(item.line_total)}</td>
+    </tr>`).join('');
+  const htmlAddress = addressText.split(', ').map(escapeHtml).join('<br>');
+  const loyaltyText = loyaltyReceipt
+    ? `\n\nLOYALTY\n-------\nStamps earned for this order: ${loyaltyReceipt.stampsEarned}\nCurrent card progress: ${loyaltyReceipt.stampCount} of ${loyaltyReceipt.cardSize}\nTotal stamps earned: ${loyaltyReceipt.totalStamps}\nStamps remaining to unlock the gift: ${loyaltyReceipt.remainingStamps}\nQualifying order threshold: INR ${Number(loyaltyReceipt.threshold).toLocaleString('en-IN')}\n${loyaltyReceipt.rewardProductName ? `Current reward: ${loyaltyReceipt.rewardProductName}\n` : ''}Reward status: ${loyaltyReceipt.rewardStatus}\n`
+    : '';
+  const htmlLoyalty = loyaltyReceipt ? `
+    <section style="margin-top:24px;padding:18px;background:#fbf7f0;border:1px solid #eadfce;border-radius:8px">
+      <h2 style="margin:0 0 12px;font-size:17px;color:#3d2b24">Your loyalty progress</h2>
+      <p style="margin:5px 0;color:#30251f"><strong>${loyaltyReceipt.stampsEarned}</strong> stamp earned for this order</p>
+      <p style="margin:5px 0;color:#30251f">Current card: <strong>${loyaltyReceipt.stampCount} of ${loyaltyReceipt.cardSize}</strong> stamps</p>
+      <p style="margin:5px 0;color:#30251f">Total stamps earned: ${loyaltyReceipt.totalStamps}</p>
+      <p style="margin:5px 0;color:#30251f">Stamps remaining to unlock your gift: ${loyaltyReceipt.remainingStamps}</p>
+      <p style="margin:5px 0;color:#30251f">Qualifying order threshold: ${formatMoney(loyaltyReceipt.threshold)}</p>
+      ${loyaltyReceipt.rewardProductName ? `<p style="margin:5px 0;color:#30251f">Current reward: ${escapeHtml(loyaltyReceipt.rewardProductName)}</p>` : ''}
+      <p style="margin:5px 0;color:#8b6b43"><strong>${escapeHtml(loyaltyReceipt.rewardStatus)}</strong></p>
+    </section>` : '';
+  const itemText = items
+    .map((item) => `${item.product_name} | Qty ${item.quantity} | Unit ${formatMoney(item.unit_price)} | ${formatMoney(item.line_total)}`)
+    .join('\n');
+
   await trySendEmail(
     {
       to: order.email,
       subject: `Order confirmed — ${order.order_number || `Order ${order.id}`}`,
       text: `Hi ${order.name || 'Customer'},
 
-Thank you for shopping with Paara Jewellery.
+Your order is confirmed. Thank you for choosing Paara Jewellery.
 
-Your payment has been successfully received and your order has been confirmed.
+ORDER CONFIRMATION
+Order: ${order.order_number || order.id}
+Date: ${orderDate}
+Payment: ${order.payment_method || 'PayU'} (${order.payment_status || 'paid'})
+Payment reference: ${order.payment_reference || 'Not available'}
 
-ORDER DETAILS
--------------
-Order ID: ${order.order_number || order.id}
-Order Date: ${orderDate}
-Payment Method: ${order.payment_method || 'PayU'}
-Payment Status: ${order.payment_status || 'paid'}
-Payment Reference: ${order.payment_reference || 'Not available'}
-
-ITEMS PURCHASED
----------------
-${itemLines}
-
-ORDER TOTAL
------------
-Subtotal: INR ${subtotal}
-Delivery Charge: INR ${shipping}
-Total Paid: INR ${total}
-
-DELIVERY ADDRESS
-----------------
+CUSTOMER AND SHIPPING
+${order.name || 'Customer'}${order.email ? ` | ${order.email}` : ''}${order.phone ? ` | ${order.phone}` : ''}
 ${addressText}
 
-Your official invoice is attached to this email as a PDF.
+ORDERED PRODUCTS
+${itemText}
 
-You can also view your order from your Paara Jewellery account.
-
-Thank you for choosing Paara Jewellery.
+ORDER SUMMARY
+Subtotal: INR ${subtotal}
+Discount: INR ${discountAmount}
+${Number(order.gst_amount) > 0 ? `GST: INR ${gstAmount}\n` : ''}Delivery: INR ${shipping}
+Total paid: INR ${total}${loyaltyText}
+The official invoice is attached as a PDF. You can also view your order from your Paara Jewellery account.
 
 Warm regards,
 Paara Jewellery
-https://paarajewellery.in
-`,
+https://paarajewellery.in`,
+      html: `<!doctype html>
+<html><body style="margin:0;padding:0;background:#f7f5f1;font-family:Arial,Helvetica,sans-serif;color:#30251f">
+  <div style="max-width:640px;margin:0 auto;padding:24px 14px">
+    <main style="background:#fff;padding:28px 24px;border:1px solid #eee7df;border-radius:10px">
+      <p style="margin:0;color:#8b6b43;font-size:12px;letter-spacing:2px;font-weight:bold">PAARA JEWELLERY</p>
+      <h1 style="margin:10px 0 6px;font-size:24px;color:#3d2b24">Order confirmed</h1>
+      <p style="margin:0 0 22px;line-height:1.6">Hi ${escapeHtml(order.name || 'Customer')}, your payment has been received and your order is confirmed.</p>
+      <div style="padding:14px;background:#fbf7f0;border-radius:6px;line-height:1.7">
+        <strong>Order ${escapeHtml(order.order_number || order.id)}</strong><br>
+        ${escapeHtml(orderDate)}<br>
+        ${escapeHtml(order.payment_method || 'PayU')} · ${escapeHtml(order.payment_status || 'paid')}
+        ${order.payment_reference ? `<br>Payment reference: ${escapeHtml(order.payment_reference)}` : ''}
+      </div>
+      <h2 style="margin:24px 0 8px;font-size:16px;color:#3d2b24">Customer and shipping details</h2>
+      <p style="margin:0;line-height:1.6">${escapeHtml(order.name || 'Customer')}${order.email ? `<br>${escapeHtml(order.email)}` : ''}${order.phone ? `<br>${escapeHtml(order.phone)}` : ''}<br>${htmlAddress}</p>
+      <h2 style="margin:24px 0 8px;font-size:16px;color:#3d2b24">Ordered products</h2>
+      <div style="overflow-x:auto">
+        <table role="presentation" style="width:100%;border-collapse:collapse;font-size:14px">
+          <thead><tr><th style="padding:8px;text-align:left;color:#8b6b43">Product</th><th style="padding:8px;text-align:center;color:#8b6b43">Qty</th><th style="padding:8px;text-align:right;color:#8b6b43">Amount</th></tr></thead>
+          <tbody>${htmlItems}</tbody>
+        </table>
+      </div>
+      <h2 style="margin:24px 0 8px;font-size:16px;color:#3d2b24">Order summary</h2>
+      <table role="presentation" style="width:100%;font-size:14px;line-height:1.8">
+        <tr><td>Subtotal</td><td style="text-align:right">${formatMoney(order.subtotal)}</td></tr>
+        <tr><td>Discount</td><td style="text-align:right">${formatMoney(order.discount_amount)}</td></tr>
+        ${Number(order.gst_amount) > 0 ? `<tr><td>GST</td><td style="text-align:right">${formatMoney(order.gst_amount)}</td></tr>` : ''}
+        <tr><td>Delivery</td><td style="text-align:right">${formatMoney(order.shipping_amount)}</td></tr>
+        <tr><td style="padding-top:8px;border-top:1px solid #eadfce;font-weight:bold">Total paid</td><td style="padding-top:8px;border-top:1px solid #eadfce;text-align:right;font-weight:bold">${formatMoney(order.total_amount)}</td></tr>
+      </table>
+      ${htmlLoyalty}
+      <p style="margin:24px 0 0;line-height:1.6">Your official invoice is attached as a PDF. You can also view your order from your Paara Jewellery account.</p>
+      <p style="margin:20px 0 0;color:#8b6b43">Warm regards,<br>Paara Jewellery</p>
+    </main>
+  </div>
+</body></html>`,
       attachments: [
         {
           filename: `paara-invoice-${order.order_number || order.id}.pdf`,
@@ -319,7 +369,7 @@ async function processPayuCallback(payload, expectedStatus) {
     }
 
     try {
-      await sendPaidInvoice(order.id);
+      await sendPaidInvoice(order.id, loyalty);
 
       console.log('[ORDER_CONFIRMATION_EMAIL_SENT]', {
         orderId: order.id,

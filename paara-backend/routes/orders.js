@@ -5,6 +5,7 @@ const { calculateGST, round2 } = require('../utils/pricing');
 const { calculateShipping } = require('../utils/shipping');
 const { createInvoicePdf } = require('../utils/invoice');
 const { formatOrderNumber } = require('../utils/orderNumber');
+const { getOrderLoyaltyReceipt } = require('../utils/loyaltyReceipt');
 
 const router = express.Router();
 
@@ -463,7 +464,7 @@ router.get('/:id/invoice', requireAuth, async (req, res) => {
     }
 
     const { rows } = await db.query(
-      'SELECT o.*, c.name AS customer_name FROM orders o JOIN customers c ON c.id = o.customer_id WHERE o.id = $1 AND o.customer_id = $2',
+      'SELECT o.*, c.name AS customer_name, c.email AS customer_email, c.phone AS customer_phone FROM orders o JOIN customers c ON c.id = o.customer_id WHERE o.id = $1 AND o.customer_id = $2',
       [orderId, req.customer.id]
     );
 
@@ -494,7 +495,12 @@ router.get('/:id/invoice', requireAuth, async (req, res) => {
     const invoiceName =
       `paara-invoice-${order.order_number || formatOrderNumber(order.created_at, order.id)}.pdf`;
 
-    const pdf = await createInvoicePdf(order, items, address);
+    const loyaltyReceipt = await getOrderLoyaltyReceipt(
+      db,
+      order.id,
+      req.customer.id
+    );
+    const pdf = await createInvoicePdf(order, items, address, loyaltyReceipt);
 
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Length', pdf.length);

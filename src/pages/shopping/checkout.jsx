@@ -62,15 +62,36 @@ export default function Checkout() {
   const [previewingInvoice, setPreviewingInvoice] = useState(false);
   const [previewUrl, setPreviewUrl] = useState("");
   const [error, setError] = useState("");
-  const [loyaltyThreshold, setLoyaltyThreshold] = useState(19);
+  const [loyaltyThreshold, setLoyaltyThreshold] = useState(null);
+  const [loyaltyThresholdError, setLoyaltyThresholdError] = useState("");
 
   useEffect(() => {
-    getLoyaltyThreshold()
-      .then((settings) => {
-        const threshold = Number(settings?.threshold);
-        if (Number.isFinite(threshold) && threshold > 0) setLoyaltyThreshold(threshold);
-      })
-      .catch(() => {});
+    let active = true;
+    const refreshLoyaltyThreshold = () => {
+      getLoyaltyThreshold()
+        .then((settings) => {
+          const threshold = Number(settings?.threshold);
+          if (!Number.isFinite(threshold) || threshold <= 0) {
+            throw new Error("The loyalty earning threshold is invalid.");
+          }
+          if (active) {
+            setLoyaltyThreshold(threshold);
+            setLoyaltyThresholdError("");
+          }
+        })
+        .catch((err) => {
+          if (active) {
+            setLoyaltyThreshold(null);
+            setLoyaltyThresholdError(err?.message || "Could not load the current loyalty threshold.");
+          }
+        });
+    };
+    refreshLoyaltyThreshold();
+    window.addEventListener("focus", refreshLoyaltyThreshold);
+    return () => {
+      active = false;
+      window.removeEventListener("focus", refreshLoyaltyThreshold);
+    };
   }, []);
   const paymentRedirectStarted = useRef(false);
 
@@ -551,13 +572,15 @@ export default function Checkout() {
               </div>
             ) : (
               <div className="space-y-2 text-sm">
-                {productSubtotal >= loyaltyThreshold ? (
+                {Number.isFinite(loyaltyThreshold) ? productSubtotal >= loyaltyThreshold ? (
                   <div className="mb-4 border border-gold/30 bg-gold/10 px-3 py-2 text-xs text-cocoa">
                     <p className="font-medium">PAARA Loyalty Card included</p>
                     <p className="mt-1 text-cocoa/70">This purchase earns you 1 stamp.</p>
                   </div>
                 ) : (
                   <p className="mb-4 text-xs text-cocoa/60">Spend {formatPrice(loyaltyThreshold - productSubtotal)} more to earn your Loyalty Card stamp.</p>
+                ) : (
+                  <p className="mb-4 text-xs text-cocoa/60">{loyaltyThresholdError || "Loading the current loyalty threshold…"}</p>
                 )}
                 <div className="flex justify-between">
                   <span className="text-cocoa/70">Item Total</span>

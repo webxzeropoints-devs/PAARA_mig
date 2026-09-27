@@ -47,7 +47,7 @@ function logTransportConfig(context) {
   });
 }
 
-async function sendEmail({ to, subject, text, attachments = [] }) {
+async function sendEmail({ to, subject, text, html, attachments = [] }) {
   const smtpConfig = readSmtpConfig();
   if (!smtpConfig.user || !smtpConfig.pass || !smtpConfig.host) {
     const error = new Error('Email service is not configured.');
@@ -66,6 +66,7 @@ async function sendEmail({ to, subject, text, attachments = [] }) {
     to,
     subject,
     text,
+    html,
     attachments,
   });
 }

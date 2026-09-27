@@ -13,9 +13,24 @@ const QUALIFYING_PAYMENT_STATUSES = new Set([
 
 const addMonths = (date, months) => {
   const result = new Date(date);
-  result.setMonth(result.getMonth() + months);
+  const day = result.getUTCDate();
+  result.setUTCDate(1);
+  result.setUTCMonth(result.getUTCMonth() + months);
+  const lastDay = new Date(Date.UTC(
+    result.getUTCFullYear(),
+    result.getUTCMonth() + 1,
+    0
+  )).getUTCDate();
+  result.setUTCDate(Math.min(day, lastDay));
   return result.toISOString();
 };
+
+const isExpiredIncompleteCard = (card, at = new Date()) =>
+  Boolean(
+    card?.expires_at &&
+    !card.completed_at &&
+    new Date(card.expires_at).getTime() <= at.getTime()
+  );
 
 const serializeCard = (card, threshold = DEFAULT_THRESHOLD) => ({
   stampCount: Number(card?.stamp_count || 0),
@@ -73,8 +88,26 @@ async function ensureLoyaltyCard(client, customerId) {
   );
 }
 
+async function resetExpiredIncompleteCard(customerId, client = db) {
+  const hasRewardColumn = await hasCustomerRewardColumn(client);
+  return client.query(`
+    UPDATE loyalty_cards
+    SET stamp_count = 0,
+        first_stamp_at = NULL,
+        expires_at = NULL,
+        completed_at = NULL,
+        ${hasRewardColumn ? 'reward_product_id = NULL,' : ''}
+        updated_at = to_char(CURRENT_TIMESTAMP, 'YYYY-MM-DD HH24:MI:SS')
+    WHERE customer_id = $1
+      AND completed_at IS NULL
+      AND NULLIF(BTRIM(expires_at), '')::timestamptz <= CURRENT_TIMESTAMP
+    RETURNING customer_id
+  `, [customerId]);
+}
+
 async function getLoyaltyState(customerId, client = db) {
   await ensureLoyaltyCard(client, customerId);
+  await resetExpiredIncompleteCard(customerId, client);
 
   const cardResult = await client.query(`
     SELECT lc.*, COALESCE(total.total_stamps, 0) AS total_stamps,
@@ -186,17 +219,8 @@ async function syncRecentPaidLoyaltyOrders(customerId) {
       return;
     }
 
-    if (card.expires_at && new Date(card.expires_at) <= now && !card.completed_at) {
-      await client.query(`
-        UPDATE loyalty_cards
-        SET stamp_count = 0,
-            first_stamp_at = NULL,
-            expires_at = NULL,
-            completed_at = NULL,
-            ${hasRewardColumn ? 'reward_product_id = NULL,' : ''}
-            updated_at = to_char(CURRENT_TIMESTAMP, 'YYYY-MM-DD HH24:MI:SS')
-        WHERE customer_id = $1
-      `, [customerId]);
+    if (isExpiredIncompleteCard(card, now)) {
+      await resetExpiredIncompleteCard(customerId, client);
       cardResult = await client.query(
         'SELECT * FROM loyalty_cards WHERE customer_id = $1 FOR UPDATE',
         [customerId]
@@ -259,7 +283,7 @@ async function syncRecentPaidLoyaltyOrders(customerId) {
         };
       }
 
-      if (card.expires_at && new Date(card.expires_at) <= paidAt && !card.completed_at) {
+      if (isExpiredIncompleteCard(card, paidAt)) {
         card = {
           ...card,
           stamp_count: 0,
@@ -328,17 +352,8 @@ async function syncRecentPaidLoyaltyOrders(customerId) {
       };
     }
 
-    if (card.expires_at && new Date(card.expires_at) <= now && !card.completed_at) {
-      await client.query(`
-        UPDATE loyalty_cards
-        SET stamp_count = 0,
-            first_stamp_at = NULL,
-            expires_at = NULL,
-            completed_at = NULL,
-            ${hasRewardColumn ? 'reward_product_id = NULL,' : ''}
-            updated_at = to_char(CURRENT_TIMESTAMP, 'YYYY-MM-DD HH24:MI:SS')
-        WHERE customer_id = $1
-      `, [customerId]);
+    if (isExpiredIncompleteCard(card, now)) {
+      await resetExpiredIncompleteCard(customerId, client);
     }
 
     await client.query('COMMIT');
@@ -608,10 +623,7 @@ async function processLoyaltyOrder(orderId, customerId) {
       };
     }
 
-    const expired =
-      card?.expires_at &&
-      new Date(card.expires_at) <= now &&
-      !card.completed_at;
+    const expired = isExpiredIncompleteCard(card, now);
 
     if (expired) {
       await client.query(`
@@ -710,9 +722,12 @@ async function processLoyaltyOrder(orderId, customerId) {
 module.exports = {
   CARD_SIZE,
   QUALIFYING_PAYMENT_STATUSES,
+  addMonths,
+  isExpiredIncompleteCard,
   isQualifyingLoyaltyOrder,
   getLoyaltyThreshold,
   getLoyaltyRewardProduct,
+  resetExpiredIncompleteCard,
   getLoyaltyState,
   hasCustomerRewardColumn,
   hasLoyaltyClaimSchema,

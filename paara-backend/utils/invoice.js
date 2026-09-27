@@ -12,7 +12,7 @@ function money(value) {
   return `INR ${amount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
-function createInvoicePdf(order, items, address) {
+function createInvoicePdf(order, items, address, loyaltyReceipt = null) {
   return new Promise((resolve, reject) => {
     if (!order || !Array.isArray(items)) {
       reject(new Error('Invoice requires an order and item list.'));
@@ -54,6 +54,12 @@ function createInvoicePdf(order, items, address) {
     doc.text(pdfText(`Payment: ${paymentLabel}`));
     if (order.payment_reference) doc.text(pdfText(`Payment Reference: ${order.payment_reference}`));
     if (order.customer_name || order.name) doc.text(pdfText(`Customer: ${order.customer_name || order.name}`));
+    if (order.customer_email || order.email) {
+      doc.text(pdfText(`Email: ${order.customer_email || order.email}`));
+    }
+    if (order.customer_phone || order.phone) {
+      doc.text(pdfText(`Phone: ${order.customer_phone || order.phone}`));
+    }
     doc.moveDown(1.2);
     if (address) {
       doc.fillColor('#8b6b43').font('Helvetica-Bold').fontSize(10).text('SHIPPING ADDRESS');
@@ -61,8 +67,7 @@ function createInvoicePdf(order, items, address) {
       doc.text(pdfText(`${address.line1}${address.line2 ? `, ${address.line2}` : ''}`));
       doc.text(pdfText(`${address.city}, ${address.state} - ${address.pincode}`));
     }
-    doc.moveDown(1.2);
-    doc.moveDown(1);
+    doc.moveDown(0.6);
     doc.fillColor('#8b6b43').font('Helvetica-Bold').fontSize(11).text('ORDER ITEMS');
     doc.moveDown(0.4);
     const tableTop = doc.y;
@@ -84,13 +89,42 @@ function createInvoicePdf(order, items, address) {
     doc.font('Helvetica').fontSize(10).fillColor('#3d2b24');
     doc.text(pdfText(`Subtotal: ${money(order.subtotal)}`), left + 300, doc.y, { width: 185, align: 'right' });
     doc.text(pdfText(`Discount: ${money(order.discount_amount || 0)}`), left + 300, doc.y, { width: 185, align: 'right' });
-    if (!order.hideTaxBreakdown) doc.text('Taxes: Included in product prices', left + 300, doc.y, { width: 185, align: 'right' });
+    if (Number(order.gst_amount) > 0) {
+      doc.text(pdfText(`GST: ${money(order.gst_amount)}`), left + 300, doc.y, { width: 185, align: 'right' });
+    }
     doc.text(pdfText(`Delivery Charge: ${money(order.shipping_amount)}`), left + 300, doc.y, { width: 185, align: 'right' });
     doc.moveDown(0.4);
     const totalTop = doc.y;
     doc.rect(left + 280, totalTop, 205, 29).fill('#3d2b24');
-    doc.fillColor('#ffffff').font('Helvetica-Bold').fontSize(12).text(pdfText(`TOTAL PAYABLE: ${money(order.total_amount)}`), left + 290, totalTop + 8, { width: 185, align: 'right' });
+    const totalLabel = order.payment_status === 'paid' ? 'TOTAL PAID' : 'TOTAL PAYABLE';
+    doc.fillColor('#ffffff').font('Helvetica-Bold').fontSize(12).text(pdfText(`${totalLabel}: ${money(order.total_amount)}`), left + 290, totalTop + 8, { width: 185, align: 'right' });
     doc.y = totalTop + 42;
+    if (loyaltyReceipt) {
+      const loyaltyTop = doc.y;
+      doc.rect(left, loyaltyTop, width, 102).fillAndStroke('#fbf7f0', '#eadfce');
+      doc.fillColor('#8b6b43').font('Helvetica-Bold').fontSize(10)
+        .text('YOUR LOYALTY PROGRESS', left + 12, loyaltyTop + 10);
+      doc.fillColor('#3d2b24').font('Helvetica').fontSize(9);
+      doc.text(
+        pdfText(`${loyaltyReceipt.stampsEarned} stamp earned for this order | Current card: ${loyaltyReceipt.stampCount} of ${loyaltyReceipt.cardSize}`),
+        left + 12,
+        loyaltyTop + 28,
+        { width: width - 24 }
+      );
+      doc.text(
+        pdfText(`Total stamps earned: ${loyaltyReceipt.totalStamps} | Stamps remaining to unlock the gift: ${loyaltyReceipt.remainingStamps}`),
+        left + 12,
+        loyaltyTop + 45,
+        { width: width - 24 }
+      );
+      doc.text(
+        pdfText(`Qualifying order threshold: ${money(loyaltyReceipt.threshold)} | Reward status: ${loyaltyReceipt.rewardStatus}${loyaltyReceipt.rewardProductName ? ` (${loyaltyReceipt.rewardProductName})` : ''}`),
+        left + 12,
+        loyaltyTop + 62,
+        { width: width - 24 }
+      );
+      doc.y = loyaltyTop + 114;
+    }
     doc.fillColor('#8b6b43').font('Helvetica').fontSize(9).text('Thank you for choosing Paara.');
     doc.end();
   });
