@@ -242,7 +242,8 @@ export const adminUpdateCategory = (id, payload) => adminRequest(`/admin/categor
 export const adminDeleteCategory = (id) => adminRequest(`/admin/categories/${id}`, { method: "DELETE" });
 export const adminCreateProduct = (payload) => adminRequest("/admin/products", { method: "POST", body: payload });
 export const adminUpdateProduct = (id, payload) => adminRequest(`/admin/products/${id}`, { method: "PUT", body: payload });
-export const adminDeleteProduct = (id) => adminRequest(`/admin/products/${id}`, { method: "DELETE" });
+export const adminDeleteProduct = (id, force = false) =>
+  adminRequest(`/admin/products/${id}${force ? "?force=true" : ""}`, { method: "DELETE" });
 export const adminDeleteCustomer = (id) => adminRequest(`/admin/customers/${id}`, { method: "DELETE" });
 export const adminSetVault = (product_ids) => adminRequest("/admin/vault", { method: "POST", body: { product_ids } });
 export const adminListCoupons = () => adminRequest("/admin/coupons");
