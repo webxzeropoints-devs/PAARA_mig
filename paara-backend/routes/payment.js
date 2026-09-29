@@ -13,7 +13,10 @@ const { createInvoicePdf } = require('../utils/invoice');
 const { maskSensitiveText } = require('../utils/validate');
 const { createOrder } = require('./orders');
 const { processLoyaltyOrder } = require('../services/loyalty');
-const { buildLoyaltyReceipt } = require('../utils/loyaltyReceipt');
+const {
+  buildLoyaltyReceipt,
+  getOrderLoyaltyReceipt,
+} = require('../utils/loyaltyReceipt');
 
 const router = express.Router();
 
@@ -52,6 +55,12 @@ async function markOrderPaid(orderId, paymentReference) {
         throw new Error('Insufficient stock while confirming payment.');
       }
     }
+
+    await client.query(`
+      INSERT INTO order_confirmation_email_notifications (order_id)
+      VALUES ($1)
+      ON CONFLICT (order_id) DO NOTHING
+    `, [orderId]);
 
     await client.query('COMMIT');
     return true;
@@ -94,12 +103,18 @@ async function sendPaidInvoice(orderId, loyaltyResult) {
 
   const order = orderRows[0];
 
-  if (!order || !order.email) {
+  if (
+    !order ||
+    String(order.payment_status || '').trim().toLowerCase() !== 'paid' ||
+    !order.email
+  ) {
     console.error('[ORDER_CONFIRMATION_EMAIL_SKIPPED]', {
       orderId,
       reason: !order
         ? 'Order not found.'
-        : 'Customer email address is missing.',
+        : String(order.payment_status || '').trim().toLowerCase() !== 'paid'
+          ? 'Payment is not confirmed.'
+          : 'Customer email address is missing.',
     });
     return { success: false, skipped: true };
   }
@@ -116,7 +131,9 @@ async function sendPaidInvoice(orderId, loyaltyResult) {
 
   const address = addressRows[0];
 
-  const loyaltyReceipt = buildLoyaltyReceipt(loyaltyResult);
+  const loyaltyReceipt = loyaltyResult
+    ? buildLoyaltyReceipt(loyaltyResult)
+    : await getOrderLoyaltyReceipt(db, order.id, order.customer_id);
   const pdf = await createInvoicePdf(order, items, address, loyaltyReceipt);
 
   const orderDate = order.created_at
@@ -385,26 +402,6 @@ async function processPayuCallback(payload, expectedStatus) {
     await processVerifiedOrderLoyalty(order);
 
   if (newlyPaid) {
-    void sendPaidInvoice(order.id, loyalty)
-      .then((delivery) => {
-        if (delivery?.skipped) return;
-        if (!delivery?.success) {
-          console.error('[INVOICE_EMAIL_FAILED]', {
-            orderId: order.id,
-            reason: 'Email service did not confirm delivery.',
-          });
-          return;
-        }
-        console.log('[ORDER_CONFIRMATION_EMAIL_SENT]', { orderId: order.id });
-      })
-      .catch((error) => {
-        console.error('[INVOICE_EMAIL_FAILED]', {
-          orderId: order.id,
-          message: maskSensitiveText(error.message),
-          name: error.name,
-        });
-      });
-
     return {
       orderId: order.id,
       paid: true,
@@ -644,3 +641,4 @@ router.post('/payu/failure', payuCallback('failure'));
 router.post('/webhook', payuWebhook);
 
 module.exports = router;
+module.exports.sendPaidInvoice = sendPaidInvoice;

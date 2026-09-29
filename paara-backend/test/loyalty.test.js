@@ -8,6 +8,7 @@ const {
   hasLoyaltyClaimSchema,
   isExpiredIncompleteCard,
   isQualifyingLoyaltyOrder,
+  getLoyaltyState,
   processLoyaltyOrder,
   resetExpiredIncompleteCard,
 } = require('../services/loyalty');
@@ -113,6 +114,62 @@ test('reports an unapplied reward migration without requiring reward columns', a
   };
 
   assert.equal(await hasLoyaltyClaimSchema(client), false);
+});
+
+test('shows an assigned reward while its claim email is pending or failed', async () => {
+  const statements = [];
+  const client = {
+    async query(sql) {
+      statements.push(sql);
+      if (sql.includes('information_schema.columns')) {
+        return { rows: [{ ready: true }] };
+      }
+      if (sql.includes('SELECT lc.*, COALESCE')) {
+        return {
+          rows: [{
+            customer_id: 42,
+            stamp_count: 6,
+            completed_at: '2026-09-27 12:00:00',
+            reward_redeemed_at: null,
+            reward_product_id: 91,
+          }],
+        };
+      }
+      if (sql.includes('JOIN products p')) {
+        return {
+          rows: [{
+            id: 91,
+            name: 'Pearl Gift',
+            is_active: true,
+            image_url: null,
+          }],
+        };
+      }
+      if (sql.includes('FROM loyalty_reward_claims')) {
+        return {
+          rows: [{
+            status: 'email_pending',
+            email_status: 'failed',
+            token_status: 'pending',
+            token_expires_at: new Date(Date.now() + 86400000),
+          }],
+        };
+      }
+      if (sql.includes('SELECT reward_threshold')) {
+        return { rows: [{ reward_threshold: 599 }] };
+      }
+      return { rows: [] };
+    },
+  };
+
+  const state = await getLoyaltyState(42, client);
+
+  assert.equal(state.rewardEligible, true);
+  assert.equal(state.rewardProduct.name, 'Pearl Gift');
+  assert.equal(state.rewardClaimStatus, 'email_pending');
+  assert.equal(state.rewardClaimEmailStatus, 'failed');
+  assert.equal(state.rewardClaimReady, false);
+  assert.match(statements.find((sql) => sql.includes('FROM loyalty_cards lc') && sql.includes('JOIN products p')), /claim\.status IN \('reward_selected', 'email_pending', 'email_sent'\)/);
 });
 
 test('reprocessing a paid order returns its existing stamp without awarding another', async () => {

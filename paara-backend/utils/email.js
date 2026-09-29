@@ -112,4 +112,41 @@ function getEmailConfigurationStatus() {
   };
 }
 
-module.exports = { sendEmail, trySendEmail, getEmailConfigurationStatus };
+async function verifyEmailTransport({
+  createTransport = nodemailer.createTransport,
+} = {}) {
+  const status = getEmailConfigurationStatus();
+  if (!status.configured) {
+    return {
+      configured: false,
+      verified: false,
+      errorCode: status.errorCode || 'EMAIL_NOT_CONFIGURED',
+    };
+  }
+
+  const smtpConfig = readSmtpConfig();
+  const transporter = createTransport(getTransportOptions(smtpConfig));
+  try {
+    await transporter.verify();
+    return { configured: true, verified: true };
+  } catch (error) {
+    return {
+      configured: true,
+      verified: false,
+      errorCode: error.code || 'SMTP_VERIFY_FAILED',
+      responseCode: Number.isInteger(error.responseCode)
+        ? error.responseCode
+        : null,
+      command: String(error.command || '').slice(0, 32) || null,
+    };
+  } finally {
+    transporter.close();
+  }
+}
+
+module.exports = {
+  sendEmail,
+  trySendEmail,
+  getEmailConfigurationStatus,
+  verifyEmailTransport,
+};

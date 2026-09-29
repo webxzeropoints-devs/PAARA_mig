@@ -50,13 +50,13 @@ included in `FRONTEND_URL`; credentials and PayU callbacks must use HTTPS.
 
 ## Loyalty reward claim emails
 
-Six completed stamps make a customer eligible, but do not send the selected-gift
-claim email. In Admin → Coupons & Loyalty, choose the customer's gift and use
-**Confirm & send claim email** to queue it. The confirmation, claim token, and
-email outbox state are committed together. The backend worker sends to the
-registered customer email, retries transient failures up to five attempts, and
-exposes a manual retry action in the admin panel after terminal failure. An
-admin can also issue a fresh link if a delivered claim link expires unclaimed.
+Six completed stamps make a customer eligible. In Admin → Coupons & Loyalty,
+choosing a gift commits the assignment and queues its claim email together.
+The backend worker sends to the registered customer email, retries transient
+failures up to five attempts, and exposes a manual retry action in the admin
+panel after terminal failure. An admin can also issue a fresh link if a
+delivered claim link expires unclaimed. Existing assignments awaiting owner
+confirmation can still be confirmed from the admin panel.
 
 Claim links expire 30 days after confirmation. The database stores only a
 SHA-256 token hash for validation and an authenticated encrypted copy while
@@ -66,6 +66,16 @@ The related PostgreSQL migration is
 `prisma/migrations/20260927170000_loyalty_reward_claim_email/migration.sql`.
 Apply it only to an isolated local/test database before exercising the new
 workflow; do not point local migration commands at production.
+
+Verified PayU payments also enqueue order confirmation emails in the same
+transaction that marks the order paid. The backend worker retries failed
+deliveries with backoff. Its table is defined in
+`prisma/migrations/20260929203000_add_order_confirmation_email_outbox/migration.sql`;
+apply that migration to a local/test database before running the new worker.
+
+An authenticated administrator can check mail configuration and SMTP
+connectivity at `GET /api/admin-auth/email-diagnostics`. It returns only
+configuration readiness and sanitized SMTP error metadata, never credentials.
 
 The customer claim page validates the token on the backend and then requires
 the matching signed-in customer to choose a saved delivery address. Claiming

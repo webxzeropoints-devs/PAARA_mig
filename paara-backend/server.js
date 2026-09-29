@@ -21,6 +21,7 @@ const { formatOrderNumber } = require('./utils/orderNumber');
 const mediaStore = require('./utils/mediaStore');
 const { createLoyaltyStampEmailWorker } = require('./services/loyaltyStampEmailNotifications');
 const { createLoyaltyRewardClaimEmailWorker } = require('./services/loyaltyRewardClaimEmails');
+const { createOrderConfirmationEmailWorker } = require('./services/orderConfirmationEmails');
 
 const productsRouter = require('./routes/products');
 const vaultRouter = require('./routes/vault');
@@ -39,6 +40,9 @@ const loyaltyRouter = require('./routes/loyalty');
 const paaraStoryRouter = require('./routes/paaraStory');
 const loyaltyStampEmailWorker = createLoyaltyStampEmailWorker();
 const loyaltyRewardClaimEmailWorker = createLoyaltyRewardClaimEmailWorker();
+const orderConfirmationEmailWorker = createOrderConfirmationEmailWorker({
+  sendOrderEmail: paymentRouter.sendPaidInvoice,
+});
 
 const app = express();
 const safeRequestPath = (requestPath) => String(requestPath || '')
@@ -396,6 +400,8 @@ if (db.isServerless) {
       console.log('[LOYALTY_EMAIL_OUTBOX] Worker started.');
       loyaltyRewardClaimEmailWorker.start();
       console.log('[LOYALTY_REWARD_CLAIM_EMAIL_OUTBOX] Worker started.');
+      orderConfirmationEmailWorker.start();
+      console.log('[ORDER_CONFIRMATION_EMAIL_OUTBOX] Worker started.');
     } catch (error) {
       console.error('[DB] Failed to initialize database tables:', error.message);
     }
@@ -417,6 +423,7 @@ if (db.isServerless) {
     console.log('Received kill signal, shutting down gracefully.');
     loyaltyStampEmailWorker.stop();
     loyaltyRewardClaimEmailWorker.stop();
+    orderConfirmationEmailWorker.stop();
     const forceTimer = setTimeout(() => {
       console.error('Could not close connections in time, forcefully shutting down');
       try { db.close(); } catch { /* already closed */ }

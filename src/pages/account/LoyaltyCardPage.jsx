@@ -72,6 +72,7 @@ export default function LoyaltyCardPage() {
 
   const count = loyalty?.stampCount || 0;
   const latestClaim = loyalty?.rewardHistory?.[0];
+  const rewardClaimReady = Boolean(loyalty?.rewardClaimReady);
   const handleClaim = async () => {
     if (!addressId) {
       setError("Add a delivery address before claiming your reward.");
@@ -103,14 +104,25 @@ export default function LoyaltyCardPage() {
           <div className="max-w-xl border border-cocoa/10 bg-white/50 p-5 text-sm">
             <p className="font-display text-xl">{loyalty.rewardEligible ? "Reward unlocked" : `${6 - count} more stamp${6 - count === 1 ? "" : "s"} to unlock your reward`}</p>
             {loyalty.rewardEligible && loyalty.rewardProduct ? (
-              <div className="mt-4 flex items-center gap-4 border border-cocoa/10 bg-shell p-3">
-                {loyalty.rewardProduct.image_url && <img src={loyalty.rewardProduct.image_url} alt={loyalty.rewardProduct.name} className="h-20 w-20 object-cover" />}
-                <div>
-                  <p className="text-[10px] uppercase tracking-widest text-gold">Your complimentary gift</p>
-                  <p className="mt-1 font-product-name text-cocoa">{loyalty.rewardProduct.name}</p>
-                  <p className="mt-1 text-xs text-cocoa/60">Product and standard delivery are free.</p>
+              <>
+                <div className="mt-4 flex items-center gap-4 border border-cocoa/10 bg-shell p-3">
+                  {loyalty.rewardProduct.image_url && <img src={loyalty.rewardProduct.image_url} alt={loyalty.rewardProduct.name} className="h-20 w-20 object-cover" />}
+                  <div>
+                    <p className="text-[10px] uppercase tracking-widest text-gold">Your complimentary gift</p>
+                    <p className="mt-1 font-product-name text-cocoa">{loyalty.rewardProduct.name}</p>
+                    <p className="mt-1 text-xs text-cocoa/60">Product and standard delivery are free.</p>
+                  </div>
                 </div>
-              </div>
+                {!rewardClaimReady && (
+                  <p className="mt-3 text-cocoa/65">
+                    {loyalty.rewardClaimStatus === "email_sent"
+                      ? "Your claim link has expired. Contact PAARA to have it renewed."
+                      : loyalty.rewardClaimEmailStatus === "failed"
+                        ? "Your gift is assigned, but the secure claim email could not be delivered. Please contact PAARA for help."
+                        : "Your gift is assigned. The secure claim option will appear here once the claim email is delivered."}
+                  </p>
+                )}
+              </>
             ) : loyalty.rewardEligible ? (
               <p className="mt-3 text-cocoa/65">
                 {loyalty.rewardClaimStatus === "reward_selected"
@@ -122,7 +134,7 @@ export default function LoyaltyCardPage() {
             ) : (
               <p className="mt-2 text-cocoa/65">Complete six stamps within six months to receive the jewellery gift selected by PAARA. The reward cannot be exchanged for cash.</p>
             )}
-            {loyalty.rewardEligible && loyalty.rewardProduct && !claimedOrder && (
+            {loyalty.rewardEligible && rewardClaimReady && loyalty.rewardProduct && !claimedOrder && (
               <>
                 {addresses.length > 0 ? (
                   <label className="mt-4 block text-xs uppercase tracking-widest text-cocoa/60">

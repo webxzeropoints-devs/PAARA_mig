@@ -75,6 +75,20 @@ async function selectLoyaltyReward(customerId, productId) {
           updated_at = to_char(CURRENT_TIMESTAMP, 'YYYY-MM-DD HH24:MI:SS')
       WHERE customer_id = $1
     `, [customerId, productId]);
+    if (productId !== null) {
+      const notification = await queueRewardClaimEmail(
+        client,
+        customerId,
+        card.completed_at,
+        productId
+      );
+      return {
+        customer_id: customerId,
+        reward_product_id: productId,
+        ...notification,
+      };
+    }
+
     await client.query(`
       INSERT INTO loyalty_reward_claims (
         customer_id, eligibility_completed_at, reward_product_id, status,

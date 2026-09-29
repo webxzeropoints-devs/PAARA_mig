@@ -5,6 +5,7 @@ const db = require('../db/database.pg');
 const mediaStore = require('../utils/mediaStore');
 const { requireAdminSession } = require('../middleware/adminAuth');
 const { issuePasswordResetOtp, consumePasswordResetOtp, markPasswordResetOtpUsed } = require('../utils/passwordReset');
+const { verifyEmailTransport } = require('../utils/email');
 const { normalizeEmail } = require('../utils/emailOtp');
 const { validatePassword, PASSWORD_ERROR, maskEmail } = require('../utils/validate');
 
@@ -159,10 +160,22 @@ router.post('/forgot-password/request', async (req, res) => {
       message: 'Password reset code sent to your admin email.'
     });
   } catch (error) {
+    console.error('[ADMIN_PASSWORD_RESET_EMAIL_FAILED]', {
+      name: error.name,
+      code: error.code,
+      responseCode: error.responseCode,
+      command: error.command,
+    });
     return res.status(503).json({
       error: 'Unable to send the password reset email right now.'
     });
   }
+});
+
+router.get('/email-diagnostics', requireAdminSession, async (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  const result = await verifyEmailTransport();
+  return res.status(result.verified ? 200 : 503).json(result);
 });
 
 router.post('/forgot-password/reset', async (req, res) => {

@@ -43,6 +43,8 @@ const serializeCard = (card, threshold = DEFAULT_THRESHOLD) => ({
   rewardEligible: Boolean(card?.completed_at && !card?.reward_redeemed_at),
   rewardProduct: card?.reward_product || null,
   rewardClaimStatus: card?.reward_claim_status || null,
+  rewardClaimEmailStatus: card?.reward_claim_email_status || null,
+  rewardClaimReady: Boolean(card?.reward_claim_ready),
   threshold,
   cardSize: CARD_SIZE,
   history: card?.history || [],
@@ -81,10 +83,8 @@ async function getLoyaltyRewardProduct(customerId, client = db) {
         FROM loyalty_reward_claims claim
         WHERE claim.customer_id = lc.customer_id
           AND claim.eligibility_completed_at = lc.completed_at
-          AND claim.status = 'email_sent'
-          AND claim.email_status = 'sent'
-          AND claim.token_status = 'active'
-          AND claim.token_expires_at > CURRENT_TIMESTAMP
+          AND claim.reward_product_id = p.id
+          AND claim.status IN ('reward_selected', 'email_pending', 'email_sent')
       )
   `, [customerId]);
   const product = result.rows[0];
@@ -96,13 +96,20 @@ async function getLoyaltyRewardProduct(customerId, client = db) {
 async function getLoyaltyRewardClaimStatus(customerId, completedAt, client = db) {
   if (!completedAt) return null;
   const result = await client.query(`
-    SELECT status, email_status
+    SELECT status, email_status, token_status, token_expires_at
     FROM loyalty_reward_claims
     WHERE customer_id = $1 AND eligibility_completed_at = $2
   `, [customerId, completedAt]);
-  return result.rows[0]
-    ? { status: result.rows[0].status, emailStatus: result.rows[0].email_status }
-    : null;
+  const claim = result.rows[0];
+  if (!claim) return null;
+  return {
+    status: claim.status,
+    emailStatus: claim.email_status,
+    ready: claim.status === 'email_sent' &&
+      claim.email_status === 'sent' &&
+      claim.token_status === 'active' &&
+      new Date(claim.token_expires_at).getTime() > Date.now(),
+  };
 }
 
 async function ensureLoyaltyCard(client, customerId) {
@@ -182,16 +189,20 @@ async function getLoyaltyState(customerId, client = db) {
     ORDER BY r.redeemed_at DESC, r.id DESC
   `, [customerId]);
 
+  const claimStatus = await getLoyaltyRewardClaimStatus(
+    customerId,
+    card?.completed_at,
+    client
+  );
+
   return serializeCard({
     ...card,
     reward_product: await getLoyaltyRewardProduct(customerId, client),
     history: historyResult.rows,
     reward_history: rewardHistoryResult.rows,
-    reward_claim_status: (await getLoyaltyRewardClaimStatus(
-      customerId,
-      card?.completed_at,
-      client
-    ))?.status || null,
+    reward_claim_status: claimStatus?.status || null,
+    reward_claim_email_status: claimStatus?.emailStatus || null,
+    reward_claim_ready: claimStatus?.ready || false,
   }, await getLoyaltyThreshold(client));
 }
 

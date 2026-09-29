@@ -229,7 +229,7 @@ test('repeated owner confirmation queues only one reward email and token', async
   });
 });
 
-test('selecting a gift records selection but does not queue or send an email', async () => {
+test('assigning a gift queues its customer claim email in the assignment transaction', async () => {
   const originalConnect = db.pool.connect;
   let selection = null;
   let notificationQueued = false;
@@ -256,6 +256,9 @@ test('selecting a gift records selection but does not queue or send an email', a
         assert.equal(params[1], 91);
         return { rows: [], rowCount: 1 };
       }
+      if (sql.includes('SELECT email FROM customers')) {
+        return { rows: [{ email: 'registered@example.test' }], rowCount: 1 };
+      }
       if (sql.includes('INSERT INTO loyalty_reward_claims')) {
         selection = params;
         notificationQueued = /'pending'/.test(sql);
@@ -268,9 +271,14 @@ test('selecting a gift records selection but does not queue or send an email', a
 
   try {
     const result = await selectLoyaltyReward(22, 91);
-    assert.deepEqual(result, { customer_id: 22, reward_product_id: 91 });
-    assert.equal(selection[3], 'reward_selected');
-    assert.equal(notificationQueued, false);
+    assert.deepEqual(result, {
+      customer_id: 22,
+      reward_product_id: 91,
+      status: 'email_pending',
+      email_status: 'pending',
+    });
+    assert.equal(selection[2], 91);
+    assert.equal(notificationQueued, true);
   } finally {
     db.pool.connect = originalConnect;
   }
